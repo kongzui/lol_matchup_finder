@@ -1,0 +1,11 @@
+.env
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+data/*.db
+data/*.db-journal
+.streamlit/secrets.toml
+.vscode/
+.idea/
