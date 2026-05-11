@@ -296,18 +296,18 @@ body {{
     justify-content: center;
     width: 34px;
     height: 34px;
-    border: 1px solid #303746;
+    border: 1px solid #d8dee8;
     border-radius: 6px;
-    background: #171c26;
-    color: #dce1ea;
+    background: #ffffff;
+    color: #172033;
     font-size: 14px;
     font-weight: 800;
     line-height: 1;
     cursor: pointer;
 }}
 .copy-action:hover {{
-    border-color: #20c997;
-    color: #ffffff;
+    border-color: #0f9f7a;
+    color: #0f9f7a;
 }}
 </style>
 <script>
