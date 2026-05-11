@@ -1,6 +1,14 @@
 {
   "permissions": {
-    "allow": ["Read(*)", "Edit(*)", "Write(*)", "Bash(*)"],
+    "allow": [
+      "Read(*)",
+      "Edit(*)",
+      "Write(*)",
+      "Bash(*)",
+      "PowerShell(*)",
+      "WebFetch(*)",
+      "WebSearch"
+    ],
     "deny": [],
     "ask": [
       "Bash(git commit*)",
@@ -10,7 +18,15 @@
       "Bash(rm*)",
       "Bash(del*)",
       "Bash(format*)",
-      "Bash(rmdir*)"
+      "Bash(rmdir*)",
+
+      "PowerShell(git commit*)",
+      "PowerShell(git push*)",
+      "PowerShell(git rm*)",
+      "PowerShell(git checkout*)",
+      "PowerShell(Remove-Item *)",
+      "PowerShell(Remove-Item*)",
+      "PowerShell(format*)"
     ]
   }
 }
