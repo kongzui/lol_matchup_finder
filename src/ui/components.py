@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
 from html import escape
 from typing import Any
 
 import streamlit as st
+from streamlit.components.v1 import html as components_html
 
 from src.cache import MatchCache
 from src.champions import ChampionData, champion_icon_url
@@ -20,6 +22,10 @@ from src.ui.match_detail import render_match_detail
 
 def _h(value: Any) -> str:
     return escape(str(value or ""), quote=True)
+
+
+def _js(value: Any) -> str:
+    return json.dumps(str(value or ""), ensure_ascii=False)
 
 
 def _split_riot_id(row: dict[str, Any]) -> tuple[str, str]:
@@ -141,8 +147,8 @@ def render_empty_state() -> None:
 def render_result_card(
     row: dict[str, Any],
     champion_data: ChampionData,
-) -> tuple[str, str]:
-    """결과 카드 HTML과 복사용 Riot ID를 만든다."""
+) -> str:
+    """복사 버튼이 포함된 결과 카드 HTML을 만든다."""
     result_cls = "win" if row["win"] else "loss"
     result_text = "승리" if row["win"] else "패배"
 
@@ -169,8 +175,169 @@ def render_result_card(
     duration_min = max(int(row.get("game_duration", 0) // 60), 0)
     enemy_name, enemy_tag = _split_riot_id(row)
     enemy_riot_id = f"{enemy_name}#{enemy_tag}" if enemy_tag else enemy_name
+    enemy_opgg_url = build_opgg_url(enemy_name, enemy_tag) if enemy_tag else ""
 
-    card_html = f"""
+    return f"""
+<style>
+body {{
+    margin: 0;
+    background: transparent;
+    font-family: "Source Sans Pro", sans-serif;
+}}
+.match-row {{
+    box-sizing: border-box;
+    display: grid;
+    grid-template-columns: 94px minmax(220px, 1.45fr) 72px minmax(92px, 0.65fr) minmax(190px, 1fr) 86px;
+    gap: 12px;
+    align-items: center;
+    min-height: 86px;
+    padding: 12px 14px;
+    border: 1px solid #252a35;
+    border-left-width: 4px;
+    border-radius: 8px;
+    background: #11141b;
+}}
+.match-row.win {{ border-left-color: #20c997; }}
+.match-row.loss {{ border-left-color: #ff6b6b; }}
+.match-date strong,
+.match-date span,
+.score-block strong,
+.score-block span,
+.enemy-block strong,
+.enemy-block span {{
+    display: block;
+}}
+.match-date strong {{
+    color: #e8ecf3;
+    font-size: 12px;
+}}
+.match-date span {{
+    margin-top: 3px;
+    color: #7f899c;
+    font-size: 11px;
+}}
+.matchup-mini {{
+    display: grid;
+    grid-template-columns: minmax(72px, 1fr) 28px minmax(72px, 1fr);
+    gap: 8px;
+    align-items: center;
+}}
+.matchup-mini div {{
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}}
+.matchup-mini img {{
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    border: 1px solid #303746;
+}}
+.matchup-mini span,
+.enemy-block strong {{
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}}
+.matchup-mini span {{
+    color: #d9dee8;
+    font-size: 12px;
+    font-weight: 700;
+}}
+.matchup-mini b {{
+    color: #737d90;
+    font-size: 11px;
+    text-align: center;
+}}
+.result-pill {{
+    display: inline-flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 30px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 850;
+}}
+.result-pill.win {{
+    background: rgba(32, 201, 151, 0.12);
+    color: #20c997;
+}}
+.result-pill.loss {{
+    background: rgba(255, 107, 107, 0.12);
+    color: #ff6b6b;
+}}
+.score-block strong {{
+    color: #f1f4f8;
+    font-size: 15px;
+}}
+.score-block span,
+.enemy-block span {{
+    margin-top: 4px;
+    color: #8d96a8;
+    font-size: 12px;
+}}
+.enemy-block {{
+    min-width: 0;
+}}
+.enemy-block strong {{
+    color: #f1f4f8;
+    font-size: 15px;
+}}
+.row-actions {{
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+}}
+.icon-action {{
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    border: 1px solid #303746;
+    border-radius: 6px;
+    background: #171c26;
+    color: #dce1ea;
+    font-size: 14px;
+    font-weight: 800;
+    line-height: 1;
+    text-decoration: none;
+    cursor: pointer;
+}}
+.icon-action:hover {{
+    border-color: #20c997;
+    color: #ffffff;
+}}
+@media (max-width: 760px) {{
+    .match-row {{
+        grid-template-columns: 1fr;
+        min-height: auto;
+    }}
+    .row-actions {{
+        justify-content: flex-start;
+    }}
+}}
+</style>
+<script>
+async function copyRiotId(button) {{
+    const value = {_js(enemy_riot_id)};
+    try {{
+        await navigator.clipboard.writeText(value);
+        const oldText = button.textContent;
+        button.textContent = "OK";
+        window.setTimeout(() => button.textContent = oldText, 900);
+    }} catch (error) {{
+        const input = document.createElement("input");
+        input.value = value;
+        document.body.appendChild(input);
+        input.select();
+        document.execCommand("copy");
+        input.remove();
+    }}
+}}
+</script>
 <div class="match-row {result_cls}">
   <div class="match-date">
     <strong>{_h(day_part)}</strong>
@@ -190,9 +357,12 @@ def render_result_card(
     <strong>{_h(enemy_name)}</strong>
     <span>#{_h(enemy_tag)}</span>
   </div>
+  <div class="row-actions">
+    <button class="icon-action" type="button" title="Riot ID 복사" onclick="copyRiotId(this)">⧉</button>
+    <a class="icon-action" href="{_h(enemy_opgg_url)}" target="_blank" title="OP.GG 열기">↗</a>
+  </div>
 </div>
 """
-    return card_html, enemy_riot_id
 
 
 def render_results(
@@ -221,37 +391,21 @@ def render_results(
 
     render_section_title("결과 목록")
     for row in payload.results:
-        card_html, enemy_riot_id = render_result_card(row, champion_data)
-        enemy_name, enemy_tag = _split_riot_id(row)
-        enemy_opgg_url = build_opgg_url(enemy_name, enemy_tag) if enemy_tag else ""
-
-        row_cols = st.columns([6.2, 1.45])
-        with row_cols[0]:
-            st.markdown(card_html, unsafe_allow_html=True)
-            with st.expander("매치 상세 보기", expanded=False):
-                match_full = (
-                    cache.get_match(row["match_id"]) if row.get("match_id") else None
+        components_html(render_result_card(row, champion_data), height=92)
+        with st.expander("매치 상세 보기", expanded=False):
+            match_full = (
+                cache.get_match(row["match_id"]) if row.get("match_id") else None
+            )
+            focus = (
+                extract_focus_view(match_full, account["puuid"]) if match_full else None
+            )
+            if focus is not None:
+                st.markdown(
+                    render_match_detail(focus, champion_data, static_data),
+                    unsafe_allow_html=True,
                 )
-                focus = (
-                    extract_focus_view(match_full, account["puuid"])
-                    if match_full
-                    else None
-                )
-                if focus is not None:
-                    st.markdown(
-                        render_match_detail(focus, champion_data, static_data),
-                        unsafe_allow_html=True,
-                    )
-                else:
-                    st.caption("이 매치의 상세 데이터를 찾을 수 없습니다.")
-
-        with row_cols[1]:
-            st.markdown('<div class="copy-panel">', unsafe_allow_html=True)
-            st.caption("Riot ID 복사")
-            st.code(enemy_riot_id, language=None)
-            if enemy_opgg_url:
-                st.link_button("OP.GG", enemy_opgg_url, use_container_width=True)
-            st.markdown("</div>", unsafe_allow_html=True)
+            else:
+                st.caption("이 매치의 상세 데이터를 찾을 수 없습니다.")
 
     st.download_button(
         label="CSV 다운로드",
