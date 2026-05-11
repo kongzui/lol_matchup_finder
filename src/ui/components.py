@@ -204,7 +204,7 @@ def render_result_card(
     meta_col, summary_col, enemy_col, action_col = st.columns(
         [0.14, 0.43, 0.29, 0.14],
         gap="small",
-        vertical_alignment="center",
+        vertical_alignment="top",
     )
     with meta_col:
         st.markdown(
@@ -236,6 +236,8 @@ def render_result_card(
             """,
             unsafe_allow_html=True,
         )
+        if loadout_html:
+            st.markdown(loadout_html, unsafe_allow_html=True)
 
     with enemy_col:
         st.markdown(
@@ -273,11 +275,6 @@ def render_result_card(
                 args=(detail_id,),
                 use_container_width=True,
             )
-
-    if loadout_html:
-        _, loadout_col, _ = st.columns([0.14, 0.72, 0.14], gap="small")
-        with loadout_col:
-            st.markdown(loadout_html, unsafe_allow_html=True)
 
 
 def _copy_riot_id_button_html(enemy_riot_id: str) -> str:
