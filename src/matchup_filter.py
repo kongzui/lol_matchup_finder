@@ -182,6 +182,7 @@ def extract_matchup_result(
         enemy_riot_id = enemy_laner.get("summonerName") or "Unknown"
 
     cs = (me.get("totalMinionsKilled") or 0) + (me.get("neutralMinionsKilled") or 0)
+    me_detail = _participant_detail(me)
 
     return {
         "match_id": metadata.get("matchId"),
@@ -206,4 +207,12 @@ def extract_matchup_result(
         "damage_to_champions": int(me.get("totalDamageDealtToChampions") or 0),
         "game_duration": int(info.get("gameDuration") or 0),
         "game_version": info.get("gameVersion"),
+        "my_champion_level": me_detail["champion_level"],
+        "my_summoner1_id": me_detail["summoner1_id"],
+        "my_summoner2_id": me_detail["summoner2_id"],
+        "my_items": me_detail["items"],
+        "my_primary_tree_id": me_detail["primary_tree_id"],
+        "my_primary_runes": me_detail["primary_runes"],
+        "my_secondary_tree_id": me_detail["secondary_tree_id"],
+        "my_secondary_runes": me_detail["secondary_runes"],
     }

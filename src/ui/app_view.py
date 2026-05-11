@@ -31,30 +31,47 @@ from src.ui.components import (
 from src.utils import LANE_LABELS, RiotIdParseError
 
 
+CACHE_VERSION = 4
+
+
 @st.cache_resource(show_spinner=False)
-def get_match_cache(db_path: str) -> MatchCache:
+def get_match_cache(db_path: str, cache_version: int) -> MatchCache:
+    """SQLite 캐시 객체를 가져온다."""
+    _ = cache_version
     return MatchCache(db_path)
 
 
 @st.cache_resource(show_spinner=False)
-def get_champion_repo(db_path: str) -> ChampionRepository:
+def get_champion_repo(db_path: str, cache_version: int) -> ChampionRepository:
+    _ = cache_version
     return ChampionRepository(db_path)
 
 
 @st.cache_data(show_spinner="챔피언 목록을 불러오는 중...", ttl=60 * 60)
-def load_champion_data(db_path: str, force_refresh: bool = False) -> ChampionData:
-    repo = get_champion_repo(db_path)
+def load_champion_data(
+    db_path: str,
+    force_refresh: bool = False,
+    cache_version: int = CACHE_VERSION,
+) -> ChampionData:
+    _ = cache_version
+    repo = get_champion_repo(db_path, cache_version)
     return repo.load(force_refresh=force_refresh)
 
 
 @st.cache_resource(show_spinner=False)
-def get_static_data_repo(db_path: str) -> StaticDataRepository:
+def get_static_data_repo(db_path: str, cache_version: int) -> StaticDataRepository:
+    _ = cache_version
     return StaticDataRepository(db_path)
 
 
 @st.cache_data(show_spinner="룬·소환사 주문 메타데이터를 불러오는 중...", ttl=60 * 60)
-def load_static_data(db_path: str, force_refresh: bool = False) -> StaticData:
-    repo = get_static_data_repo(db_path)
+def load_static_data(
+    db_path: str,
+    force_refresh: bool = False,
+    cache_version: int = CACHE_VERSION,
+) -> StaticData:
+    _ = cache_version
+    repo = get_static_data_repo(db_path, cache_version)
     return repo.load(force_refresh=force_refresh)
 
 
@@ -83,7 +100,11 @@ def _render_sidebar(config: AppConfig) -> None:
         if st.button("챔피언 목록 새로고침", use_container_width=True):
             load_champion_data.clear()
             try:
-                champion_data = load_champion_data(config.db_path, force_refresh=True)
+                champion_data = load_champion_data(
+                    config.db_path,
+                    force_refresh=True,
+                    cache_version=CACHE_VERSION,
+                )
                 st.success(f"갱신 완료 · v{champion_data.version}")
             except Exception as exc:
                 st.error(f"갱신 실패: {exc}")
@@ -91,7 +112,11 @@ def _render_sidebar(config: AppConfig) -> None:
         if st.button("룬·주문 메타 새로고침", use_container_width=True):
             load_static_data.clear()
             try:
-                static_data = load_static_data(config.db_path, force_refresh=True)
+                static_data = load_static_data(
+                    config.db_path,
+                    force_refresh=True,
+                    cache_version=CACHE_VERSION,
+                )
                 st.success(f"갱신 완료 · v{static_data.version}")
             except Exception as exc:
                 st.error(f"갱신 실패: {exc}")
@@ -100,13 +125,19 @@ def _render_sidebar(config: AppConfig) -> None:
 def _load_required_data(config: AppConfig) -> tuple[ChampionData, StaticData] | None:
     """UI에 필요한 정적 데이터를 로딩한다."""
     try:
-        champion_data = load_champion_data(config.db_path)
+        champion_data = load_champion_data(
+            config.db_path,
+            cache_version=CACHE_VERSION,
+        )
     except Exception as exc:
         st.error(f"챔피언 목록을 불러올 수 없습니다: {exc}")
         return None
 
     try:
-        static_data = load_static_data(config.db_path)
+        static_data = load_static_data(
+            config.db_path,
+            cache_version=CACHE_VERSION,
+        )
     except Exception as exc:
         st.error(f"룬·소환사 주문 메타데이터를 불러올 수 없습니다: {exc}")
         return None
@@ -116,8 +147,12 @@ def _load_required_data(config: AppConfig) -> tuple[ChampionData, StaticData] | 
 
 def _render_search_controls(
     champion_data: ChampionData,
+    default_riot_id: str | None,
 ) -> tuple[SearchRequest, bool]:
     """검색 입력 위젯을 그리고 요청 객체를 만든다."""
+    if default_riot_id and "riot_id_input" not in st.session_state:
+        st.session_state["riot_id_input"] = default_riot_id
+
     render_section_title("검색 조건")
     with st.container(border=True):
         riot_id_raw = st.text_input(
@@ -203,7 +238,7 @@ def _run_submitted_search(
     """검색 버튼 클릭 시 검색을 실행하고 세션에 결과를 저장한다."""
     progress_bar = st.progress(0.0)
     status_box = st.empty()
-    cache = get_match_cache(config.db_path)
+    cache = get_match_cache(config.db_path, CACHE_VERSION)
 
     def progress_cb(value: float) -> None:
         progress_bar.progress(min(max(value, 0.0), 1.0))
@@ -253,8 +288,10 @@ def render_app(config: AppConfig) -> None:
         return
 
     champion_data, static_data = loaded
+    cache = get_match_cache(config.db_path, CACHE_VERSION)
+    default_riot_id = cache.get_latest_search_riot_id()
     header_slot = st.empty()
-    request, submitted = _render_search_controls(champion_data)
+    request, submitted = _render_search_controls(champion_data, default_riot_id)
 
     my_key = champion_data.to_english_key(request.my_champion_korean)
     enemy_key = champion_data.to_english_key(request.enemy_champion_korean)
@@ -280,5 +317,4 @@ def render_app(config: AppConfig) -> None:
 
     payload = st.session_state.get("last_payload")
     if payload is not None:
-        cache = get_match_cache(config.db_path)
-        render_results(payload, champion_data, cache, static_data)
+        render_results(payload, champion_data, cache, static_data, config)

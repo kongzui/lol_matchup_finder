@@ -10,7 +10,7 @@ import json
 import os
 import sqlite3
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
@@ -18,7 +18,7 @@ import httpx
 
 VERSIONS_URL = "https://ddragon.leagueoflegends.com/api/versions.json"
 CHAMPION_URL_TEMPLATE = (
-    "https://ddragon.leagueoflegends.com/cdn/{version}/data/ko_KR/champion.json"
+    "https://ddragon.leagueoflegends.com/cdn/{version}/data/ko_KR/championFull.json"
 )
 
 # 7일이 지나면 패치 버전을 다시 확인한다.
@@ -36,12 +36,32 @@ class ChampionData:
     ko_to_en: dict[str, str]
     # 영문 키 → 한글 이름 (예: "Ahri" → "아리")
     en_to_ko: dict[str, str]
+    # 영문 키 → 스킬 슬롯 정보(Q/W/E/R)
+    spells_by_champion: dict[str, list[dict[str, str]]] = field(default_factory=dict)
 
     def to_english_key(self, korean_name: str) -> str | None:
         return self.ko_to_en.get(korean_name)
 
     def to_korean_name(self, english_key: str) -> str:
         return self.en_to_ko.get(english_key, english_key)
+
+    def spell_info(self, champion_key: str, skill_slot: int) -> dict[str, str] | None:
+        """챔피언의 스킬 슬롯(1=Q, 2=W, 3=E, 4=R) 정보를 반환한다."""
+        spells = self.spells_by_champion.get(champion_key) or []
+        idx = skill_slot - 1
+        if idx < 0 or idx >= len(spells):
+            return None
+        return spells[idx]
+
+    def spell_icon_url(self, champion_key: str, skill_slot: int) -> str | None:
+        """챔피언 스킬 아이콘 URL."""
+        spell = self.spell_info(champion_key, skill_slot)
+        if not spell or not spell.get("image"):
+            return None
+        return (
+            f"https://ddragon.leagueoflegends.com/cdn/{self.version}"
+            f"/img/spell/{spell['image']}"
+        )
 
 
 def champion_icon_url(version: str, champion_key: str) -> str:
@@ -93,7 +113,9 @@ class ChampionRepository:
 
         if not force_refresh and cached is not None:
             cache_age = now - cached["fetched_at"]
-            if cache_age < VERSION_CHECK_TTL_SECONDS:
+            if cache_age < VERSION_CHECK_TTL_SECONDS and self._payload_has_spell_data(
+                cached["payload_json"]
+            ):
                 return self._build_data(cached["version"], cached["payload_json"])
 
         try:
@@ -108,6 +130,7 @@ class ChampionRepository:
             not force_refresh
             and cached is not None
             and cached["version"] == latest_version
+            and self._payload_has_spell_data(cached["payload_json"])
         ):
             # 버전은 같지만 TTL만 지난 경우: 페이로드 재사용 후 fetched_at만 갱신한다.
             self._touch_cache(latest_version, cached["payload_json"])
@@ -166,12 +189,23 @@ class ChampionRepository:
             resp.raise_for_status()
             return resp.text
 
+    def _payload_has_spell_data(self, payload_json: str) -> bool:
+        try:
+            payload = json.loads(payload_json)
+        except json.JSONDecodeError:
+            return False
+        data = payload.get("data", {})
+        if not isinstance(data, dict):
+            return False
+        return any(bool(entry.get("spells")) for entry in data.values())
+
     def _build_data(self, version: str, payload_json: str) -> ChampionData:
         payload = json.loads(payload_json)
         data = payload.get("data", {})
 
         ko_to_en: dict[str, str] = {}
         en_to_ko: dict[str, str] = {}
+        spells_by_champion: dict[str, list[dict[str, str]]] = {}
         for entry in data.values():
             english_key = entry.get("id")
             korean_name = entry.get("name")
@@ -179,6 +213,17 @@ class ChampionRepository:
                 continue
             ko_to_en[korean_name] = english_key
             en_to_ko[english_key] = korean_name
+            spells = []
+            for spell in entry.get("spells", []):
+                image = spell.get("image") or {}
+                spells.append(
+                    {
+                        "id": spell.get("id") or "",
+                        "name": spell.get("name") or "",
+                        "image": image.get("full") or "",
+                    }
+                )
+            spells_by_champion[english_key] = spells
 
         korean_names = sorted(ko_to_en.keys())
         return ChampionData(
@@ -186,4 +231,5 @@ class ChampionRepository:
             korean_names=korean_names,
             ko_to_en=ko_to_en,
             en_to_ko=en_to_ko,
+            spells_by_champion=spells_by_champion,
         )

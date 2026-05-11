@@ -1,7 +1,7 @@
 """Riot API 호출 클라이언트.
 
 - Account-V1: Riot ID → PUUID
-- Match-V5: matchId 목록, matchId → 상세 JSON
+- Match-V5: matchId 목록, matchId → 상세 JSON, matchId → 타임라인 JSON
 - 429 응답 시 Retry-After 헤더에 따라 한 번 대기 후 재시도한다.
 - 403/404 등은 의미 있는 예외로 변환한다.
 """
@@ -138,6 +138,17 @@ class RiotClient:
         )
         return self._get_json(
             url, not_found_message=(f"매치 데이터를 찾을 수 없습니다: {match_id}")
+        )
+
+    def get_match_timeline_by_id(self, match_id: str) -> dict[str, Any]:
+        """matchId로 매치 타임라인 데이터를 가져온다."""
+        url = (
+            f"https://{self._region}.api.riotgames.com"
+            f"/lol/match/v5/matches/{quote(match_id, safe='')}/timeline"
+        )
+        return self._get_json(
+            url,
+            not_found_message=(f"매치 타임라인 데이터를 찾을 수 없습니다: {match_id}"),
         )
 
     # --- 내부 ---

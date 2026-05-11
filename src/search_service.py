@@ -163,6 +163,25 @@ def fetch_match_detail(
     return match
 
 
+def fetch_match_timeline(
+    client: RiotClient,
+    cache: MatchCache,
+    match_id: str,
+) -> dict[str, Any] | None:
+    """matchId로 타임라인 데이터를 가져오되 캐시를 먼저 사용한다."""
+    cached = cache.get_match_timeline(match_id)
+    if cached is not None:
+        return cached
+
+    try:
+        timeline = client.get_match_timeline_by_id(match_id)
+    except RiotApiNotFound:
+        return None
+
+    cache.save_match_timeline(match_id, timeline)
+    return timeline
+
+
 def run_search(
     *,
     config: AppConfig,

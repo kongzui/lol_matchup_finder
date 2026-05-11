@@ -463,7 +463,25 @@ label,
     margin-bottom: 12px;
     border: 1px solid #252a35;
     border-radius: 8px;
-    background: #0f1218;
+    background: #0f1218 !important;
+    overflow: hidden;
+}
+
+[data-testid="stExpander"] details,
+[data-testid="stExpander"] summary,
+[data-testid="stExpander"] [data-testid="stExpanderDetails"] {
+    background: #0f1218 !important;
+}
+
+[data-testid="stExpander"] [data-testid="stExpanderDetails"] {
+    border-top: 1px solid #252a35;
+    padding-top: 8px;
+}
+
+[data-testid="stExpander"] [data-testid="stMarkdownContainer"],
+[data-testid="stExpander"] [data-testid="stVerticalBlock"],
+[data-testid="stExpander"] [data-testid="stElementContainer"] {
+    background: transparent !important;
 }
 
 [data-testid="stExpander"] summary {
@@ -494,6 +512,207 @@ label,
     border: 1px solid #252a35;
     border-radius: 8px;
     background: #151923;
+}
+
+.focus-build-panel {
+    margin: 10px 0 14px;
+    border: 1px solid #252a35;
+    border-radius: 8px;
+    background: #121620;
+    overflow: hidden;
+}
+
+.focus-build-panel > .detail-title {
+    margin: 0;
+    padding: 10px 12px;
+    border-bottom: 1px solid #252a35;
+    background: #171b25;
+}
+
+.build-section {
+    padding: 10px 12px 12px;
+    border-bottom: 1px solid #252a35;
+}
+
+.build-section:last-child {
+    border-bottom: 0;
+}
+
+.build-section-title {
+    margin-bottom: 8px;
+    color: #9aa3b3;
+    font-size: 12px;
+    font-weight: 850;
+}
+
+.build-empty {
+    color: #7f899c;
+    font-size: 12px;
+}
+
+.item-build {
+    display: flex;
+    gap: 4px;
+    align-items: flex-start;
+    flex-wrap: wrap;
+}
+
+.build-step,
+.skill-priority-step {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.build-step span {
+    display: block;
+    margin-top: 4px;
+    color: #7f899c;
+    font-size: 11px;
+    text-align: center;
+}
+
+.build-group-icons {
+    display: flex;
+    gap: 3px;
+    align-items: center;
+    min-height: 32px;
+    padding: 3px;
+    border-radius: 6px;
+    background: #0f131b;
+}
+
+.build-group-icons img,
+.build-group-icons .build-icon-empty {
+    width: 30px;
+    height: 30px;
+    border: 1px solid #303746;
+    border-radius: 5px;
+    background: #0b0d12;
+}
+
+.build-icon {
+    position: relative;
+    width: 32px;
+    min-width: 32px;
+}
+
+.build-icon img,
+.build-icon-empty {
+    display: block;
+    width: 32px;
+    height: 32px;
+    border: 1px solid #303746;
+    border-radius: 5px;
+    background: #0b0d12;
+}
+
+.build-icon b {
+    position: absolute;
+    right: -4px;
+    bottom: -4px;
+    min-width: 16px;
+    height: 16px;
+    border-radius: 4px;
+    background: #1c6dd8;
+    color: #ffffff;
+    font-size: 10px;
+    line-height: 16px;
+    text-align: center;
+}
+
+.build-arrow {
+    color: #6f7a8d;
+    font-size: 22px;
+    line-height: 32px;
+}
+
+.skill-build {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 14px;
+    align-items: center;
+}
+
+.skill-priority,
+.skill-levels {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: wrap;
+}
+
+.skill-level {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 4px;
+    background: #082c36;
+    color: #26c6da;
+    font-size: 12px;
+    font-weight: 850;
+}
+
+.skill-level.ult {
+    background: #1c6dd8;
+    color: #ffffff;
+}
+
+.rune-detail-grid {
+    display: grid;
+    grid-template-columns: 1.1fr 1.1fr 0.8fr;
+    gap: 14px;
+}
+
+.rune-tree {
+    min-width: 0;
+    padding: 10px;
+    border-left: 1px solid #252a35;
+}
+
+.rune-tree:first-child {
+    border-left: 0;
+}
+
+.rune-tree-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 28px;
+    margin-bottom: 8px;
+    color: #aeb6c6;
+    font-size: 12px;
+}
+
+.rune-tree-head img {
+    width: 26px;
+    height: 26px;
+}
+
+.rune-slot-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 7px;
+}
+
+.rune-slot-row img {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: #0b0d12;
+}
+
+.rune-slot-row img.selected {
+    filter: none;
+    opacity: 1;
+}
+
+.rune-slot-row img.muted {
+    filter: grayscale(1);
+    opacity: 0.28;
 }
 
 .detail-player-head {
@@ -751,7 +970,8 @@ label,
     }
 
     .kpi-row,
-    .detail-others {
+    .detail-others,
+    .rune-detail-grid {
         grid-template-columns: 1fr 1fr;
     }
 
@@ -767,8 +987,19 @@ label,
 
 @media (max-width: 560px) {
     .kpi-row,
-    .detail-runes {
+    .detail-runes,
+    .rune-detail-grid,
+    .skill-build {
         grid-template-columns: 1fr;
+    }
+
+    .rune-tree {
+        border-left: 0;
+        border-top: 1px solid #252a35;
+    }
+
+    .rune-tree:first-child {
+        border-top: 0;
     }
 
     .target-name,

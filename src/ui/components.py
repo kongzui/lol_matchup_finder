@@ -11,13 +11,16 @@ from streamlit.components.v1 import html as components_html
 
 from src.cache import MatchCache
 from src.champions import ChampionData, champion_icon_url
+from src.config import AppConfig
 from src.export import build_results_csv_bytes, build_results_filename
 from src.matchup_filter import extract_focus_view
 from src.opgg import build_opgg_url
-from src.search_service import SearchPayload
-from src.static_data import StaticData
-from src.utils import unix_to_kst_datetime_str
+from src.riot_client import RiotApiError, RiotClient
+from src.search_service import SearchPayload, fetch_match_timeline
+from src.static_data import StaticData, item_icon_url
+from src.timeline import extract_player_build_timeline
 from src.ui.match_detail import render_match_detail
+from src.utils import unix_to_kst_datetime_str
 
 
 def _h(value: Any) -> str:
@@ -147,6 +150,7 @@ def render_empty_state() -> None:
 def render_result_card(
     row: dict[str, Any],
     champion_data: ChampionData,
+    static_data: StaticData,
 ) -> str:
     """복사 버튼이 포함된 결과 카드 HTML을 만든다."""
     result_cls = "win" if row["win"] else "loss"
@@ -176,6 +180,9 @@ def render_result_card(
     enemy_name, enemy_tag = _split_riot_id(row)
     enemy_riot_id = f"{enemy_name}#{enemy_tag}" if enemy_tag else enemy_name
     enemy_opgg_url = build_opgg_url(enemy_name, enemy_tag) if enemy_tag else ""
+    side_icons_html = _result_side_icons_html(row, static_data)
+    loadout_html = _result_loadout_html(row, static_data)
+    champion_level = int(row.get("my_champion_level") or 0)
 
     return f"""
 <style>
@@ -187,10 +194,10 @@ body {{
 .match-row {{
     box-sizing: border-box;
     display: grid;
-    grid-template-columns: 94px minmax(220px, 1.45fr) 72px minmax(92px, 0.65fr) minmax(190px, 1fr) 86px;
+    grid-template-columns: 112px minmax(360px, 1.45fr) minmax(250px, 0.9fr) 86px;
     gap: 12px;
     align-items: center;
-    min-height: 86px;
+    min-height: 126px;
     padding: 12px 14px;
     border: 1px solid #252a35;
     border-left-width: 4px;
@@ -199,56 +206,124 @@ body {{
 }}
 .match-row.win {{ border-left-color: #20c997; }}
 .match-row.loss {{ border-left-color: #ff6b6b; }}
-.match-date strong,
-.match-date span,
+.match-meta strong,
+.match-meta span,
+.match-meta em,
 .score-block strong,
-.score-block span,
-.enemy-block strong,
-.enemy-block span {{
+.score-block span {{
     display: block;
 }}
-.match-date strong {{
-    color: #e8ecf3;
-    font-size: 12px;
+.match-meta strong {{
+    font-size: 14px;
+    font-weight: 850;
 }}
-.match-date span {{
+.match-meta strong.win {{ color: #20c997; }}
+.match-meta strong.loss {{ color: #ff6b6b; }}
+.match-meta span {{
     margin-top: 3px;
+    color: #d4dae5;
+    font-size: 12px;
+    font-weight: 700;
+}}
+.match-meta em {{
+    margin-top: 6px;
     color: #7f899c;
     font-size: 11px;
+    font-style: normal;
 }}
-.matchup-mini {{
+.my-summary {{
     display: grid;
-    grid-template-columns: minmax(72px, 1fr) 28px minmax(72px, 1fr);
-    gap: 8px;
+    grid-template-columns: 62px 48px minmax(130px, 1fr);
+    gap: 10px;
     align-items: center;
-}}
-.matchup-mini div {{
-    display: flex;
-    align-items: center;
-    gap: 8px;
     min-width: 0;
 }}
-.matchup-mini img {{
-    width: 38px;
-    height: 38px;
+.champ-portrait {{
+    position: relative;
+    width: 58px;
+    height: 58px;
+}}
+.champ-portrait img {{
+    width: 58px;
+    height: 58px;
+    border: 2px solid #303746;
+    border-radius: 50%;
+    background: #0b0d12;
+    object-fit: cover;
+}}
+.champ-portrait span {{
+    position: absolute;
+    right: -4px;
+    bottom: -4px;
+    min-width: 19px;
+    height: 19px;
+    border: 1px solid #303746;
+    border-radius: 50%;
+    background: #11141b;
+    color: #ffffff;
+    font-size: 11px;
+    font-weight: 850;
+    line-height: 19px;
+    text-align: center;
+}}
+.side-icons {{
+    display: grid;
+    grid-template-columns: 22px 22px;
+    gap: 4px;
+}}
+.side-icon-col {{
+    display: grid;
+    grid-template-rows: 22px 22px;
+    gap: 4px;
+}}
+.side-icons img,
+.side-icon-empty {{
+    width: 22px;
+    height: 22px;
+    border: 1px solid #303746;
+    border-radius: 5px;
+    background: #0b0d12;
+    object-fit: cover;
+}}
+.enemy-target {{
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}}
+.enemy-target img {{
+    width: 46px;
+    height: 46px;
     border-radius: 50%;
     border: 1px solid #303746;
+    background: #0b0d12;
+    object-fit: cover;
 }}
-.matchup-mini span,
-.enemy-block strong {{
+.enemy-target div {{
+    min-width: 0;
+}}
+.enemy-target span,
+.enemy-target strong,
+.enemy-target em {{
+    display: block;
+}}
+.enemy-target span {{
+    color: #7f899c;
+    font-size: 11px;
+    font-weight: 700;
+}}
+.enemy-target strong {{
+    color: #f1f4f8;
+    font-size: 15px;
+    font-weight: 850;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }}
-.matchup-mini span {{
-    color: #d9dee8;
+.enemy-target em {{
+    margin-top: 3px;
+    color: #8d96a8;
     font-size: 12px;
-    font-weight: 700;
-}}
-.matchup-mini b {{
-    color: #737d90;
-    font-size: 11px;
-    text-align: center;
 }}
 .result-pill {{
     display: inline-flex;
@@ -269,20 +344,17 @@ body {{
 }}
 .score-block strong {{
     color: #f1f4f8;
-    font-size: 15px;
+    font-size: 19px;
+    letter-spacing: 0.02em;
 }}
-.score-block span,
-.enemy-block span {{
+.score-block strong b {{
+    color: #ff6b6b;
+    font-weight: 850;
+}}
+.score-block span {{
     margin-top: 4px;
     color: #8d96a8;
     font-size: 12px;
-}}
-.enemy-block {{
-    min-width: 0;
-}}
-.enemy-block strong {{
-    color: #f1f4f8;
-    font-size: 15px;
 }}
 .row-actions {{
     display: flex;
@@ -310,6 +382,40 @@ body {{
     border-color: #20c997;
     color: #ffffff;
 }}
+.loadout-strip {{
+    grid-column: 2 / 4;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    margin-top: -2px;
+}}
+.loadout-group {{
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+}}
+.loadout-icon,
+.loadout-empty {{
+    width: 28px;
+    height: 28px;
+    border: 1px solid #303746;
+    border-radius: 5px;
+    background: #0b0d12;
+    object-fit: cover;
+}}
+.loadout-icon.small,
+.loadout-empty.small {{
+    width: 23px;
+    height: 23px;
+    border-radius: 4px;
+}}
+.loadout-separator {{
+    width: 1px;
+    height: 24px;
+    background: #303746;
+}}
 @media (max-width: 760px) {{
     .match-row {{
         grid-template-columns: 1fr;
@@ -317,6 +423,13 @@ body {{
     }}
     .row-actions {{
         justify-content: flex-start;
+    }}
+    .loadout-strip {{
+        grid-column: auto;
+        flex-wrap: wrap;
+    }}
+    .my-summary {{
+        grid-template-columns: 62px 48px minmax(0, 1fr);
     }}
 }}
 </style>
@@ -339,29 +452,97 @@ async function copyRiotId(button) {{
 }}
 </script>
 <div class="match-row {result_cls}">
-  <div class="match-date">
-    <strong>{_h(day_part)}</strong>
+  <div class="match-meta">
+    <strong class="{result_cls}">{result_text}</strong>
+    <span>{_h(day_part)}</span>
     <span>{_h(time_part)}</span>
+    <em>{duration_min}분</em>
   </div>
-  <div class="matchup-mini">
-    <div><img src="{_h(my_icon)}" alt="{_h(my_ko)}" /><span>{_h(my_ko)}</span></div>
-    <b>VS</b>
-    <div><img src="{_h(enemy_icon)}" alt="{_h(enemy_ko)}" /><span>{_h(enemy_ko)}</span></div>
+  <div class="my-summary">
+    <div class="champ-portrait">
+      <img src="{_h(my_icon)}" alt="{_h(my_ko)}" title="{_h(my_ko)}" />
+      <span>{champion_level}</span>
+    </div>
+    <div class="side-icons">{side_icons_html}</div>
+    <div class="score-block">
+      <strong>{kills} / <b>{deaths}</b> / {assists}</strong>
+      <span>CS {int(row["cs"])} · {duration_min}분 · {int(row.get("damage_to_champions") or 0):,} 피해</span>
+    </div>
   </div>
-  <div class="result-pill {result_cls}">{result_text}</div>
-  <div class="score-block">
-    <strong>{kills}/{deaths}/{assists}</strong>
-    <span>CS {int(row["cs"])} · {duration_min}분</span>
-  </div>
-  <div class="enemy-block">
-    <strong>{_h(enemy_name)}</strong>
-    <span>#{_h(enemy_tag)}</span>
+  <div class="enemy-target">
+    <img src="{_h(enemy_icon)}" alt="{_h(enemy_ko)}" title="{_h(enemy_ko)}" />
+    <div>
+      <span>상대 라이너</span>
+      <strong>{_h(enemy_name)}</strong>
+      <em>#{_h(enemy_tag)} · {_h(enemy_ko)}</em>
+    </div>
   </div>
   <div class="row-actions">
     <button class="icon-action" type="button" title="Riot ID 복사" onclick="copyRiotId(this)">⧉</button>
     <a class="icon-action" href="{_h(enemy_opgg_url)}" target="_blank" title="OP.GG 열기">↗</a>
   </div>
+  {loadout_html}
 </div>
+"""
+
+
+def _result_loadout_html(row: dict[str, Any], static_data: StaticData) -> str:
+    """결과 카드에 표시할 최종 아이템 요약 HTML."""
+    version = static_data.version
+    item_icons = []
+    for item_id in (row.get("my_items") or [])[:7]:
+        url = item_icon_url(version, item_id)
+        if url:
+            item_icons.append(
+                f'<img class="loadout-icon" src="{_h(url)}" alt="{item_id}" title="{item_id}" />'
+            )
+        else:
+            item_icons.append('<div class="loadout-empty"></div>')
+
+    if not item_icons:
+        return ""
+
+    return f"""
+<div class="loadout-strip">
+  <div class="loadout-group">{"".join(item_icons)}</div>
+</div>
+"""
+
+
+def _result_side_icons_html(row: dict[str, Any], static_data: StaticData) -> str:
+    """초상화 옆에 표시할 소환사 주문과 핵심 룬 아이콘."""
+    spell_icons = []
+    for spell_id in (row.get("my_summoner1_id"), row.get("my_summoner2_id")):
+        url = static_data.summoner_icon_url(spell_id)
+        name = static_data.summoner_name(spell_id)
+        spell_icons.append(
+            f'<img src="{_h(url)}" alt="{_h(name)}" title="{_h(name)}" />'
+            if url
+            else '<div class="side-icon-empty"></div>'
+        )
+
+    rune_icons = []
+    primary_runes = row.get("my_primary_runes") or []
+    rune_id = primary_runes[0] if primary_runes else None
+    rune_url = static_data.rune_icon_url(rune_id)
+    rune_name = static_data.rune_name(rune_id)
+    rune_icons.append(
+        f'<img src="{_h(rune_url)}" alt="{_h(rune_name)}" title="{_h(rune_name)}" />'
+        if rune_url
+        else '<div class="side-icon-empty"></div>'
+    )
+
+    tree_url = static_data.tree_icon_url(row.get("my_secondary_tree_id"))
+    tree_name = static_data.tree_name(row.get("my_secondary_tree_id"))
+    rune_icons.append(
+        f'<img src="{_h(tree_url)}" alt="{_h(tree_name)}" title="{_h(tree_name)}" />'
+        if tree_url
+        else '<div class="side-icon-empty"></div>'
+    )
+
+    return f"""
+<div class="side-icon-col">{"".join(spell_icons)}</div>
+<div class="side-icon-col">{"".join(rune_icons)}</div>
 """
 
 
@@ -370,6 +551,7 @@ def render_results(
     champion_data: ChampionData,
     cache: MatchCache,
     static_data: StaticData,
+    config: AppConfig,
 ) -> None:
     """결과 요약, 목록, 상세 패널, CSV 다운로드를 표시한다."""
     render_result_summary(payload, champion_data)
@@ -391,7 +573,7 @@ def render_results(
 
     render_section_title("결과 목록")
     for row in payload.results:
-        components_html(render_result_card(row, champion_data), height=92)
+        components_html(render_result_card(row, champion_data, static_data), height=134)
         with st.expander("매치 상세 보기", expanded=False):
             match_full = (
                 cache.get_match(row["match_id"]) if row.get("match_id") else None
@@ -400,8 +582,34 @@ def render_results(
                 extract_focus_view(match_full, account["puuid"]) if match_full else None
             )
             if focus is not None:
+                match_id = row.get("match_id") or ""
+                timeline = cache.get_match_timeline(match_id) if match_id else None
+                if timeline is None and match_id:
+                    try:
+                        with RiotClient(
+                            api_key=config.api_key,
+                            region=config.region,
+                        ) as client:
+                            timeline = fetch_match_timeline(client, cache, match_id)
+                    except RiotApiError as exc:
+                        st.warning(f"타임라인을 불러오지 못했습니다: {exc}")
+
+                build_timeline = (
+                    extract_player_build_timeline(
+                        match_full,
+                        timeline,
+                        account["puuid"],
+                    )
+                    if timeline is not None
+                    else None
+                )
                 st.markdown(
-                    render_match_detail(focus, champion_data, static_data),
+                    render_match_detail(
+                        focus,
+                        champion_data,
+                        static_data,
+                        build_timeline,
+                    ),
                     unsafe_allow_html=True,
                 )
             else:

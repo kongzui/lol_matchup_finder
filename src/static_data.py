@@ -41,6 +41,9 @@ STAT_SHARD_ICONS: dict[int, str] = {
     5005: _STAT_SHARD_BASE + "statmodsattackspeedicon.png",  # 공격 속도
     5007: _STAT_SHARD_BASE + "statmodscdrscalingicon.png",  # 능력 가속
     5008: _STAT_SHARD_BASE + "statmodsadaptiveforceicon.png",  # 적응형 능력치
+    5010: _STAT_SHARD_BASE + "statmodsmovementspeedicon.png",  # 이동 속도
+    5011: _STAT_SHARD_BASE + "statmodshealthplusicon.png",  # 체력
+    5013: _STAT_SHARD_BASE + "statmodstenacityicon.png",  # 강인함
 }
 STAT_SHARD_NAMES: dict[int, str] = {
     5001: "체력 (성장)",
@@ -49,6 +52,9 @@ STAT_SHARD_NAMES: dict[int, str] = {
     5005: "공격 속도",
     5007: "능력 가속",
     5008: "적응형 능력치",
+    5010: "이동 속도",
+    5011: "체력",
+    5013: "강인함",
 }
 
 
@@ -63,6 +69,8 @@ class StaticData:
     rune_by_id: dict[int, dict[str, Any]] = field(default_factory=dict)
     # 룬 트리: tree_id → {"name": str, "icon": "perk-images/..."}
     tree_by_id: dict[int, dict[str, str]] = field(default_factory=dict)
+    # 룬 트리 슬롯: tree_id → [[rune_id, ...], ...]
+    rune_slots_by_tree: dict[int, list[list[int]]] = field(default_factory=dict)
 
     def summoner_icon_url(self, spell_id: int | str | None) -> str | None:
         """매치 데이터의 summoner1Id/summoner2Id (숫자) → 아이콘 URL."""
@@ -109,6 +117,11 @@ class StaticData:
             return ""
         entry = self.tree_by_id.get(int(tree_id))
         return entry["name"] if entry else ""
+
+    def tree_slots(self, tree_id: int | None) -> list[list[int]]:
+        if tree_id is None:
+            return []
+        return self.rune_slots_by_tree.get(int(tree_id), [])
 
 
 def item_icon_url(version: str, item_id: int | None) -> str | None:
@@ -313,6 +326,7 @@ class StaticDataRepository:
         runes_payload_parsed = json.loads(runes_payload)
         rune_by_id: dict[int, dict[str, Any]] = {}
         tree_by_id: dict[int, dict[str, str]] = {}
+        rune_slots_by_tree: dict[int, list[list[int]]] = {}
         if isinstance(runes_payload_parsed, list):
             for tree in runes_payload_parsed:
                 tree_id = tree.get("id")
@@ -322,20 +336,26 @@ class StaticDataRepository:
                     "name": tree.get("name") or "",
                     "icon": tree.get("icon") or "",
                 }
+                rune_slots_by_tree[tree_id] = []
                 for slot in tree.get("slots", []):
+                    slot_ids: list[int] = []
                     for rune in slot.get("runes", []):
                         rune_id = rune.get("id")
                         if not isinstance(rune_id, int):
                             continue
+                        slot_ids.append(rune_id)
                         rune_by_id[rune_id] = {
                             "name": rune.get("name") or "",
                             "icon": rune.get("icon") or "",
                             "tree_id": tree_id,
                         }
+                    if slot_ids:
+                        rune_slots_by_tree[tree_id].append(slot_ids)
 
         return StaticData(
             version=version,
             summoner_by_key=summoner_by_key,
             rune_by_id=rune_by_id,
             tree_by_id=tree_by_id,
+            rune_slots_by_tree=rune_slots_by_tree,
         )

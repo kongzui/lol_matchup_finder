@@ -2,6 +2,7 @@
 
 - account_cache: Riot ID → PUUID
 - match_cache: matchId → 매치 상세 raw JSON
+- match_timeline_cache: matchId → 매치 타임라인 raw JSON
 - search_history: 검색 조건 기록 (디버깅/재검색용)
 """
 
@@ -52,6 +53,12 @@ class MatchCache:
                     match_id TEXT PRIMARY KEY,
                     queue_id INTEGER,
                     game_creation INTEGER,
+                    raw_json TEXT NOT NULL,
+                    fetched_at INTEGER NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS match_timeline_cache (
+                    match_id TEXT PRIMARY KEY,
                     raw_json TEXT NOT NULL,
                     fetched_at INTEGER NOT NULL
                 );
@@ -160,6 +167,38 @@ class MatchCache:
             )
             conn.commit()
 
+    # --- match_timeline_cache ---
+    def get_match_timeline(self, match_id: str) -> dict[str, Any] | None:
+        """matchId로 저장된 타임라인 JSON을 가져온다."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT raw_json FROM match_timeline_cache WHERE match_id = ?",
+                (match_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        try:
+            return json.loads(row["raw_json"])
+        except json.JSONDecodeError:
+            return None
+
+    def save_match_timeline(self, match_id: str, timeline: dict[str, Any]) -> None:
+        """matchId별 타임라인 JSON을 캐시한다."""
+        raw_json = json.dumps(timeline, ensure_ascii=False)
+        now = int(time.time())
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO match_timeline_cache (match_id, raw_json, fetched_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(match_id) DO UPDATE SET
+                    raw_json = excluded.raw_json,
+                    fetched_at = excluded.fetched_at
+                """,
+                (match_id, raw_json, now),
+            )
+            conn.commit()
+
     # --- search_history ---
     def record_search(
         self,
@@ -197,6 +236,21 @@ class MatchCache:
                 ),
             )
             conn.commit()
+
+    def get_latest_search_riot_id(self) -> str | None:
+        """가장 최근 검색한 Riot ID를 반환한다."""
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT target_riot_id
+                FROM search_history
+                ORDER BY created_at DESC, id DESC
+                LIMIT 1
+                """
+            ).fetchone()
+        if row is None:
+            return None
+        return row["target_riot_id"]
 
 
 def normalize_riot_id_key(game_name: str, tag_line: str) -> str:
