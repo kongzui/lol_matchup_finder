@@ -23,6 +23,9 @@ from src.ui.match_detail import render_match_detail
 from src.utils import unix_to_kst_datetime_str
 
 
+_MATCH_DETAIL_OPEN_STATE_KEY = "open_match_detail_ids"
+
+
 def _h(value: Any) -> str:
     return escape(str(value or ""), quote=True)
 
@@ -39,6 +42,16 @@ def _split_riot_id(row: dict[str, Any]) -> tuple[str, str]:
         else ""
     )
     return name, tag
+
+
+def _toggle_match_detail(detail_id: str) -> None:
+    """매치 상세 패널의 열림 상태를 토글한다."""
+    open_ids = set(st.session_state.get(_MATCH_DETAIL_OPEN_STATE_KEY, []))
+    if detail_id in open_ids:
+        open_ids.remove(detail_id)
+    else:
+        open_ids.add(detail_id)
+    st.session_state[_MATCH_DETAIL_OPEN_STATE_KEY] = sorted(open_ids)
 
 
 def render_section_title(title: str) -> None:
@@ -151,8 +164,12 @@ def render_result_card(
     row: dict[str, Any],
     champion_data: ChampionData,
     static_data: StaticData,
-) -> str:
-    """복사 버튼이 포함된 결과 카드 HTML을 만든다."""
+    *,
+    detail_id: str,
+    row_index: int,
+    detail_open: bool = False,
+) -> None:
+    """결과 카드 요약을 Streamlit 네이티브 요소로 표시한다."""
     result_cls = "win" if row["win"] else "loss"
     result_text = "승리" if row["win"] else "패배"
 
@@ -184,6 +201,87 @@ def render_result_card(
     loadout_html = _result_loadout_html(row, static_data)
     champion_level = int(row.get("my_champion_level") or 0)
 
+    meta_col, summary_col, enemy_col, action_col = st.columns(
+        [0.14, 0.43, 0.29, 0.14],
+        gap="small",
+        vertical_alignment="center",
+    )
+    with meta_col:
+        st.markdown(
+            f"""
+<div class="match-meta">
+  <strong class="{result_cls}">{result_text}</strong>
+  <span>{_h(day_part)}</span>
+  <span>{_h(time_part)}</span>
+  <em>{duration_min}분</em>
+</div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    with summary_col:
+        st.markdown(
+            f"""
+<div class="my-summary">
+  <div class="champ-portrait">
+    <img src="{_h(my_icon)}" alt="{_h(my_ko)}" title="{_h(my_ko)}" />
+    <span>{champion_level}</span>
+  </div>
+  <div class="side-icons">{side_icons_html}</div>
+  <div class="score-block">
+    <strong>{kills} / <b>{deaths}</b> / {assists}</strong>
+    <span>CS {int(row["cs"])} · {duration_min}분 · {int(row.get("damage_to_champions") or 0):,} 피해</span>
+  </div>
+</div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    with enemy_col:
+        st.markdown(
+            f"""
+<div class="enemy-target">
+  <img src="{_h(enemy_icon)}" alt="{_h(enemy_ko)}" title="{_h(enemy_ko)}" />
+  <div>
+    <span>상대 라이너</span>
+    <strong>{_h(enemy_name)}</strong>
+    <em>#{_h(enemy_tag)} · {_h(enemy_ko)}</em>
+  </div>
+</div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    with action_col:
+        copy_col, opgg_col, detail_col = st.columns(3, gap="small")
+        with copy_col:
+            components_html(_copy_riot_id_button_html(enemy_riot_id), height=36)
+        with opgg_col:
+            st.link_button(
+                "↗",
+                enemy_opgg_url or "#",
+                help="OP.GG 열기",
+                disabled=not bool(enemy_opgg_url),
+                use_container_width=True,
+            )
+        with detail_col:
+            st.button(
+                "▴" if detail_open else "▾",
+                key=f"match_detail_toggle_{row_index}",
+                help="매치 상세 닫기" if detail_open else "매치 상세 펼치기",
+                on_click=_toggle_match_detail,
+                args=(detail_id,),
+                use_container_width=True,
+            )
+
+    if loadout_html:
+        _, loadout_col, _ = st.columns([0.14, 0.72, 0.14], gap="small")
+        with loadout_col:
+            st.markdown(loadout_html, unsafe_allow_html=True)
+
+
+def _copy_riot_id_button_html(enemy_riot_id: str) -> str:
+    """Riot ID를 클립보드에 복사하는 작은 HTML 버튼을 만든다."""
     return f"""
 <style>
 body {{
@@ -191,177 +289,7 @@ body {{
     background: transparent;
     font-family: "Source Sans Pro", sans-serif;
 }}
-.match-row {{
-    box-sizing: border-box;
-    display: grid;
-    grid-template-columns: 112px minmax(360px, 1.45fr) minmax(250px, 0.9fr) 86px;
-    gap: 12px;
-    align-items: center;
-    min-height: 126px;
-    padding: 12px 14px;
-    border: 1px solid #252a35;
-    border-left-width: 4px;
-    border-radius: 8px;
-    background: #11141b;
-}}
-.match-row.win {{ border-left-color: #20c997; }}
-.match-row.loss {{ border-left-color: #ff6b6b; }}
-.match-meta strong,
-.match-meta span,
-.match-meta em,
-.score-block strong,
-.score-block span {{
-    display: block;
-}}
-.match-meta strong {{
-    font-size: 14px;
-    font-weight: 850;
-}}
-.match-meta strong.win {{ color: #20c997; }}
-.match-meta strong.loss {{ color: #ff6b6b; }}
-.match-meta span {{
-    margin-top: 3px;
-    color: #d4dae5;
-    font-size: 12px;
-    font-weight: 700;
-}}
-.match-meta em {{
-    margin-top: 6px;
-    color: #7f899c;
-    font-size: 11px;
-    font-style: normal;
-}}
-.my-summary {{
-    display: grid;
-    grid-template-columns: 62px 48px minmax(130px, 1fr);
-    gap: 10px;
-    align-items: center;
-    min-width: 0;
-}}
-.champ-portrait {{
-    position: relative;
-    width: 58px;
-    height: 58px;
-}}
-.champ-portrait img {{
-    width: 58px;
-    height: 58px;
-    border: 2px solid #303746;
-    border-radius: 50%;
-    background: #0b0d12;
-    object-fit: cover;
-}}
-.champ-portrait span {{
-    position: absolute;
-    right: -4px;
-    bottom: -4px;
-    min-width: 19px;
-    height: 19px;
-    border: 1px solid #303746;
-    border-radius: 50%;
-    background: #11141b;
-    color: #ffffff;
-    font-size: 11px;
-    font-weight: 850;
-    line-height: 19px;
-    text-align: center;
-}}
-.side-icons {{
-    display: grid;
-    grid-template-columns: 22px 22px;
-    gap: 4px;
-}}
-.side-icon-col {{
-    display: grid;
-    grid-template-rows: 22px 22px;
-    gap: 4px;
-}}
-.side-icons img,
-.side-icon-empty {{
-    width: 22px;
-    height: 22px;
-    border: 1px solid #303746;
-    border-radius: 5px;
-    background: #0b0d12;
-    object-fit: cover;
-}}
-.enemy-target {{
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    min-width: 0;
-}}
-.enemy-target img {{
-    width: 46px;
-    height: 46px;
-    border-radius: 50%;
-    border: 1px solid #303746;
-    background: #0b0d12;
-    object-fit: cover;
-}}
-.enemy-target div {{
-    min-width: 0;
-}}
-.enemy-target span,
-.enemy-target strong,
-.enemy-target em {{
-    display: block;
-}}
-.enemy-target span {{
-    color: #7f899c;
-    font-size: 11px;
-    font-weight: 700;
-}}
-.enemy-target strong {{
-    color: #f1f4f8;
-    font-size: 15px;
-    font-weight: 850;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}}
-.enemy-target em {{
-    margin-top: 3px;
-    color: #8d96a8;
-    font-size: 12px;
-}}
-.result-pill {{
-    display: inline-flex;
-    justify-content: center;
-    align-items: center;
-    min-height: 30px;
-    border-radius: 6px;
-    font-size: 13px;
-    font-weight: 850;
-}}
-.result-pill.win {{
-    background: rgba(32, 201, 151, 0.12);
-    color: #20c997;
-}}
-.result-pill.loss {{
-    background: rgba(255, 107, 107, 0.12);
-    color: #ff6b6b;
-}}
-.score-block strong {{
-    color: #f1f4f8;
-    font-size: 19px;
-    letter-spacing: 0.02em;
-}}
-.score-block strong b {{
-    color: #ff6b6b;
-    font-weight: 850;
-}}
-.score-block span {{
-    margin-top: 4px;
-    color: #8d96a8;
-    font-size: 12px;
-}}
-.row-actions {{
-    display: flex;
-    justify-content: flex-end;
-    gap: 6px;
-}}
-.icon-action {{
+.copy-action {{
     box-sizing: border-box;
     display: inline-flex;
     align-items: center;
@@ -375,62 +303,11 @@ body {{
     font-size: 14px;
     font-weight: 800;
     line-height: 1;
-    text-decoration: none;
     cursor: pointer;
 }}
-.icon-action:hover {{
+.copy-action:hover {{
     border-color: #20c997;
     color: #ffffff;
-}}
-.loadout-strip {{
-    grid-column: 2 / 4;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    min-width: 0;
-    margin-top: -2px;
-}}
-.loadout-group {{
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    min-width: 0;
-}}
-.loadout-icon,
-.loadout-empty {{
-    width: 28px;
-    height: 28px;
-    border: 1px solid #303746;
-    border-radius: 5px;
-    background: #0b0d12;
-    object-fit: cover;
-}}
-.loadout-icon.small,
-.loadout-empty.small {{
-    width: 23px;
-    height: 23px;
-    border-radius: 4px;
-}}
-.loadout-separator {{
-    width: 1px;
-    height: 24px;
-    background: #303746;
-}}
-@media (max-width: 760px) {{
-    .match-row {{
-        grid-template-columns: 1fr;
-        min-height: auto;
-    }}
-    .row-actions {{
-        justify-content: flex-start;
-    }}
-    .loadout-strip {{
-        grid-column: auto;
-        flex-wrap: wrap;
-    }}
-    .my-summary {{
-        grid-template-columns: 62px 48px minmax(0, 1fr);
-    }}
 }}
 </style>
 <script>
@@ -451,38 +328,7 @@ async function copyRiotId(button) {{
     }}
 }}
 </script>
-<div class="match-row {result_cls}">
-  <div class="match-meta">
-    <strong class="{result_cls}">{result_text}</strong>
-    <span>{_h(day_part)}</span>
-    <span>{_h(time_part)}</span>
-    <em>{duration_min}분</em>
-  </div>
-  <div class="my-summary">
-    <div class="champ-portrait">
-      <img src="{_h(my_icon)}" alt="{_h(my_ko)}" title="{_h(my_ko)}" />
-      <span>{champion_level}</span>
-    </div>
-    <div class="side-icons">{side_icons_html}</div>
-    <div class="score-block">
-      <strong>{kills} / <b>{deaths}</b> / {assists}</strong>
-      <span>CS {int(row["cs"])} · {duration_min}분 · {int(row.get("damage_to_champions") or 0):,} 피해</span>
-    </div>
-  </div>
-  <div class="enemy-target">
-    <img src="{_h(enemy_icon)}" alt="{_h(enemy_ko)}" title="{_h(enemy_ko)}" />
-    <div>
-      <span>상대 라이너</span>
-      <strong>{_h(enemy_name)}</strong>
-      <em>#{_h(enemy_tag)} · {_h(enemy_ko)}</em>
-    </div>
-  </div>
-  <div class="row-actions">
-    <button class="icon-action" type="button" title="Riot ID 복사" onclick="copyRiotId(this)">⧉</button>
-    <a class="icon-action" href="{_h(enemy_opgg_url)}" target="_blank" title="OP.GG 열기">↗</a>
-  </div>
-  {loadout_html}
-</div>
+<button class="copy-action" type="button" title="Riot ID 복사" onclick="copyRiotId(this)">⧉</button>
 """
 
 
@@ -546,6 +392,63 @@ def _result_side_icons_html(row: dict[str, Any], static_data: StaticData) -> str
 """
 
 
+def _render_linked_match_detail(
+    *,
+    row: dict[str, Any],
+    account: dict[str, Any],
+    champion_data: ChampionData,
+    cache: MatchCache,
+    static_data: StaticData,
+    config: AppConfig,
+) -> None:
+    """열린 카드 아래에 연결형 매치 상세를 표시한다."""
+    match_full = cache.get_match(row["match_id"]) if row.get("match_id") else None
+    focus = extract_focus_view(match_full, account["puuid"]) if match_full else None
+    if focus is None:
+        st.markdown(
+            """
+<div class="linked-detail-empty">
+  이 매치의 상세 데이터를 찾을 수 없습니다.
+</div>
+            """,
+            unsafe_allow_html=True,
+        )
+        return
+
+    match_id = row.get("match_id") or ""
+    timeline = cache.get_match_timeline(match_id) if match_id else None
+    if timeline is None and match_id:
+        try:
+            with RiotClient(
+                api_key=config.api_key,
+                region=config.region,
+            ) as client:
+                timeline = fetch_match_timeline(client, cache, match_id)
+        except RiotApiError as exc:
+            st.warning(f"타임라인을 불러오지 못했습니다: {exc}")
+
+    build_timeline = (
+        extract_player_build_timeline(
+            match_full,
+            timeline,
+            account["puuid"],
+        )
+        if timeline is not None
+        else None
+    )
+    detail_html = render_match_detail(
+        focus,
+        champion_data,
+        static_data,
+        build_timeline,
+    ).replace(
+        '<div class="detail-panel">',
+        '<div class="detail-panel linked-detail-panel">',
+        1,
+    )
+    st.markdown(detail_html, unsafe_allow_html=True)
+
+
 def render_results(
     payload: SearchPayload,
     champion_data: ChampionData,
@@ -572,48 +475,42 @@ def render_results(
         return
 
     render_section_title("결과 목록")
-    for row in payload.results:
-        components_html(render_result_card(row, champion_data, static_data), height=134)
-        with st.expander("매치 상세 보기", expanded=False):
-            match_full = (
-                cache.get_match(row["match_id"]) if row.get("match_id") else None
-            )
-            focus = (
-                extract_focus_view(match_full, account["puuid"]) if match_full else None
-            )
-            if focus is not None:
-                match_id = row.get("match_id") or ""
-                timeline = cache.get_match_timeline(match_id) if match_id else None
-                if timeline is None and match_id:
-                    try:
-                        with RiotClient(
-                            api_key=config.api_key,
-                            region=config.region,
-                        ) as client:
-                            timeline = fetch_match_timeline(client, cache, match_id)
-                    except RiotApiError as exc:
-                        st.warning(f"타임라인을 불러오지 못했습니다: {exc}")
+    detail_ids = [
+        str(row.get("match_id") or f"row-{idx}")
+        for idx, row in enumerate(payload.results)
+    ]
+    valid_detail_ids = set(detail_ids)
+    open_ids = (
+        set(st.session_state.get(_MATCH_DETAIL_OPEN_STATE_KEY, [])) & valid_detail_ids
+    )
+    st.session_state[_MATCH_DETAIL_OPEN_STATE_KEY] = sorted(open_ids)
 
-                build_timeline = (
-                    extract_player_build_timeline(
-                        match_full,
-                        timeline,
-                        account["puuid"],
-                    )
-                    if timeline is not None
-                    else None
+    for idx, (row, detail_id) in enumerate(
+        zip(payload.results, detail_ids, strict=True)
+    ):
+        detail_open = detail_id in open_ids
+
+        with st.container(
+            border=True,
+            key=f"match-result-card-{idx}",
+        ):
+            render_result_card(
+                row,
+                champion_data,
+                static_data,
+                detail_id=detail_id,
+                row_index=idx,
+                detail_open=detail_open,
+            )
+            if detail_open:
+                _render_linked_match_detail(
+                    row=row,
+                    account=account,
+                    champion_data=champion_data,
+                    cache=cache,
+                    static_data=static_data,
+                    config=config,
                 )
-                st.markdown(
-                    render_match_detail(
-                        focus,
-                        champion_data,
-                        static_data,
-                        build_timeline,
-                    ),
-                    unsafe_allow_html=True,
-                )
-            else:
-                st.caption("이 매치의 상세 데이터를 찾을 수 없습니다.")
 
     st.download_button(
         label="CSV 다운로드",
