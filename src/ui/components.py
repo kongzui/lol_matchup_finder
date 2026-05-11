@@ -296,18 +296,18 @@ body {{
     justify-content: center;
     width: 34px;
     height: 34px;
-    border: 1px solid #d8dee8;
+    border: 1px solid #303746;
     border-radius: 6px;
-    background: #ffffff;
-    color: #172033;
+    background: #171c26;
+    color: #dce1ea;
     font-size: 14px;
     font-weight: 800;
     line-height: 1;
     cursor: pointer;
 }}
 .copy-action:hover {{
-    border-color: #0f9f7a;
-    color: #0f9f7a;
+    border-color: #20c997;
+    color: #ffffff;
 }}
 </style>
 <script>
@@ -491,8 +491,8 @@ def render_results(
         detail_open = detail_id in open_ids
 
         with st.container(
-            border=True,
-            key=f"match-result-card-{idx}",
+            border=False,
+            key=f"match_result_card_{'win' if row['win'] else 'loss'}_{idx}",
         ):
             render_result_card(
                 row,

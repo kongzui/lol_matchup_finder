@@ -308,17 +308,36 @@ label,
     color: #ffffff !important;
 }
 
-div[class*="st-key-match-result-card-"] {
-    margin-bottom: 10px;
-}
-
-div[class*="st-key-match-result-card-"] [data-testid="stVerticalBlockBorderWrapper"] {
-    border-color: #252a35;
+div[class*="st-key-match_result_card_"] {
+    box-sizing: border-box;
+    margin-bottom: 12px;
+    padding: 12px 14px;
+    border: 1px solid #252a35;
+    border-left: 4px solid #303746;
     border-radius: 8px;
     background: #11141b;
+    overflow: hidden;
 }
 
-div[class*="st-key-match-result-card-"] [data-testid="stMarkdownContainer"] p {
+div[class*="st-key-match_result_card_win_"] {
+    border-left-color: #20c997;
+    background: #16202e;
+}
+
+div[class*="st-key-match_result_card_loss_"] {
+    border-left-color: #ff6b6b;
+    background: #251519;
+}
+
+div[class*="st-key-match_result_card_"] [data-testid="stVerticalBlock"],
+div[class*="st-key-match_result_card_"]
+    [data-testid="stElementContainer"],
+div[class*="st-key-match_result_card_"]
+    [data-testid="column"] {
+    background: transparent !important;
+}
+
+div[class*="st-key-match_result_card_"] [data-testid="stMarkdownContainer"] p {
     margin: 0;
 }
 
@@ -481,8 +500,8 @@ div[class*="st-key-match-result-card-"] [data-testid="stMarkdownContainer"] p {
     font-size: 12px;
 }
 
-div[class*="st-key-match-result-card-"] .stButton > button,
-div[class*="st-key-match-result-card-"] .stLinkButton > a {
+div[class*="st-key-match_result_card_"] .stButton > button,
+div[class*="st-key-match_result_card_"] .stLinkButton > a {
     min-height: 34px;
     height: 34px;
     padding: 0 !important;
@@ -494,8 +513,8 @@ div[class*="st-key-match-result-card-"] .stLinkButton > a {
     font-weight: 800;
 }
 
-div[class*="st-key-match-result-card-"] .stButton > button:hover,
-div[class*="st-key-match-result-card-"] .stLinkButton > a:hover {
+div[class*="st-key-match_result_card_"] .stButton > button:hover,
+div[class*="st-key-match_result_card_"] .stLinkButton > a:hover {
     border-color: #20c997 !important;
     color: #ffffff !important;
 }
@@ -1074,252 +1093,4 @@ div[class*="st-key-match-result-card-"] .stLinkButton > a:hover {
     .champ-side strong {
         font-size: 22px;
     }
-}
-
-/* 라이트 모드 색상 오버라이드 */
-:root {
-    color-scheme: light;
-}
-
-.stApp {
-    background: #f7f9fc !important;
-    color: #172033 !important;
-}
-
-[data-testid="stHeader"] {
-    background: transparent !important;
-}
-
-[data-testid="stSidebar"] {
-    background: #ffffff !important;
-    border-right-color: #d8dee8 !important;
-}
-
-[data-testid="stVerticalBlockBorderWrapper"] {
-    border-color: #d8dee8 !important;
-    background: #ffffff !important;
-}
-
-.stMarkdown,
-.stMarkdown p,
-label,
-.stCaption {
-    color: #5b667a !important;
-}
-
-.stTextInput input,
-.stSelectbox div[data-baseweb="select"] > div,
-.stDateInput input {
-    background: #ffffff !important;
-    border-color: #d8dee8 !important;
-    color: #172033 !important;
-}
-
-.stTextInput label,
-.stSelectbox label,
-.stDateInput label {
-    color: #5b667a !important;
-}
-
-.stButton > button[kind="primary"] {
-    background: #0f9f7a !important;
-    border-color: #0f9f7a !important;
-    color: #ffffff !important;
-}
-
-.stButton > button[kind="primary"]:hover {
-    background: #0b8d6c !important;
-    border-color: #0b8d6c !important;
-    color: #ffffff !important;
-}
-
-.stDownloadButton > button,
-.stLinkButton > a,
-.target-opgg,
-div[class*="st-key-match-result-card-"] .stButton > button,
-div[class*="st-key-match-result-card-"] .stLinkButton > a {
-    background: #ffffff !important;
-    border-color: #d8dee8 !important;
-    color: #172033 !important;
-}
-
-.stDownloadButton > button:hover,
-.stLinkButton > a:hover,
-.target-opgg:hover,
-div[class*="st-key-match-result-card-"] .stButton > button:hover,
-div[class*="st-key-match-result-card-"] .stLinkButton > a:hover {
-    border-color: #0f9f7a !important;
-    color: #0f9f7a !important;
-}
-
-.section-title,
-.target-name,
-.champ-side strong,
-.summary-main strong,
-.kpi-card strong,
-.empty-card strong,
-.score-block strong,
-.enemy-target strong,
-.detail-label,
-.detail-stats .name,
-.detail-stats .kda,
-.team-row .nick {
-    color: #172033 !important;
-}
-
-.section-title::before,
-.stButton > button[kind="primary"],
-.build-icon b,
-.skill-level.ult {
-    background: #0f9f7a !important;
-}
-
-.eyebrow,
-.summary-main span,
-.match-meta strong.win,
-.detail-stats .kda span,
-.detail-result.win {
-    color: #0f9f7a !important;
-}
-
-.target-block,
-.versus-block,
-.result-summary,
-.empty-card,
-div[class*="st-key-match-result-card-"] [data-testid="stVerticalBlockBorderWrapper"],
-.linked-detail-panel,
-.linked-detail-empty,
-.detail-player,
-.focus-build-panel,
-.team-col,
-.kpi-card {
-    border-color: #d8dee8 !important;
-    background: #ffffff !important;
-    box-shadow: 0 8px 24px rgba(23, 32, 51, 0.08) !important;
-}
-
-.kpi-card.primary,
-.detail-result.win {
-    border-color: rgba(15, 159, 122, 0.35) !important;
-    background: #e9f8f4 !important;
-}
-
-.target-meta span,
-.linked-detail-panel,
-.linked-detail-empty,
-.focus-build-panel,
-.focus-build-panel > .detail-title,
-.build-section,
-.build-group-icons {
-    background: #f2f5f9 !important;
-}
-
-.target-meta span,
-.champ-side span,
-.summary-main p,
-.kpi-card span,
-.kpi-card em,
-.match-meta em,
-.score-block span,
-.enemy-target span,
-.enemy-target em,
-.empty-card p,
-.detail-title,
-.build-section-title,
-.build-empty,
-.build-step span,
-.team-label,
-.team-row .tag,
-.team-kda,
-.detail-stats .name span,
-.detail-stats .extras {
-    color: #5b667a !important;
-}
-
-.match-meta span,
-.rune-tree-head {
-    color: #445066 !important;
-}
-
-.champ-side img,
-.champ-portrait img,
-.side-icons img,
-.side-icon-empty,
-.enemy-target img,
-.loadout-icon,
-.loadout-empty,
-.build-group-icons img,
-.build-group-icons .build-icon-empty,
-.build-icon img,
-.build-icon-empty,
-.detail-champ img,
-.detail-champ span,
-.detail-spells img,
-.detail-item.small,
-.detail-item,
-.detail-rune-empty,
-.team-row img,
-.rune-group img,
-.rune-slot-row img {
-    border-color: #d8dee8 !important;
-    background: #f7f9fc !important;
-}
-
-.champ-side.ally img,
-.rune-group img.keystone {
-    border-color: #0f9f7a !important;
-}
-
-.champ-side.enemy img,
-.match-meta strong.loss,
-.score-block strong b,
-.detail-result.loss {
-    border-color: #e05252 !important;
-    color: #e05252 !important;
-}
-
-.champ-portrait span,
-.detail-champ span,
-.skill-level.ult,
-.build-icon b {
-    color: #ffffff !important;
-}
-
-.champ-portrait span,
-.detail-champ span {
-    background: #ffffff !important;
-    color: #172033 !important;
-}
-
-.vs-mark,
-.build-arrow {
-    color: #7a8496 !important;
-}
-
-.side-icons img,
-.loadout-icon,
-.build-icon img,
-.build-group-icons img,
-.detail-item img,
-.detail-spells img,
-.team-row img {
-    background: #ffffff !important;
-}
-
-.linked-detail-panel,
-.focus-build-panel > .detail-title,
-.build-section,
-.detail-runes,
-.rune-tree,
-.rune-tree:first-child {
-    border-color: #d8dee8 !important;
-}
-
-.skill-level {
-    background: #e6f3fb !important;
-    color: #177ca8 !important;
-}
-
-.detail-result.loss {
-    background: #fdeeee !important;
 }

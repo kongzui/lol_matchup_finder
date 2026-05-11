@@ -64,9 +64,7 @@ def get_static_data_repo(db_path: str, cache_version: int) -> StaticDataReposito
     return StaticDataRepository(db_path)
 
 
-@st.cache_resource(
-    show_spinner="룬·소환사 주문 메타데이터를 불러오는 중...", ttl=60 * 60
-)
+@st.cache_resource(show_spinner="룬·소환사 주문 메타데이터를 불러오는 중...", ttl=60 * 60)
 def load_static_data(
     db_path: str,
     force_refresh: bool = False,
