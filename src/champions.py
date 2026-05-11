@@ -44,6 +44,14 @@ class ChampionData:
         return self.en_to_ko.get(english_key, english_key)
 
 
+def champion_icon_url(version: str, champion_key: str) -> str:
+    """Data Dragon 챔피언 정사각형 아이콘 URL."""
+    return (
+        f"https://ddragon.leagueoflegends.com/cdn/{version}"
+        f"/img/champion/{champion_key}.png"
+    )
+
+
 class ChampionRepository:
     """Data Dragon 챔피언 목록을 조회하고 SQLite에 캐시한다."""
 
