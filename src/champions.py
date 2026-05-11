@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import time
 from dataclasses import dataclass
@@ -49,7 +50,13 @@ class ChampionRepository:
     def __init__(self, db_path: str, http_timeout: float = 10.0):
         self._db_path = db_path
         self._timeout = http_timeout
+        self._ensure_parent_dir()
         self._ensure_table()
+
+    def _ensure_parent_dir(self) -> None:
+        parent = os.path.dirname(os.path.abspath(self._db_path))
+        if parent:
+            os.makedirs(parent, exist_ok=True)
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self._db_path)
