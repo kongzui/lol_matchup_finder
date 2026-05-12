@@ -15,7 +15,7 @@ def main() -> None:
         page_title="LoL 매치업 상대 닉네임 추출기",
         page_icon="🎯",
         layout="wide",
-        initial_sidebar_state="collapsed",
+        initial_sidebar_state="expanded",
     )
     apply_theme()
     render_app(load_config())

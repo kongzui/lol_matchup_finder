@@ -51,6 +51,7 @@ class RiotClient:
         self,
         api_key: str,
         region: str = "asia",
+        platform: str = "kr",
         timeout: float = DEFAULT_TIMEOUT,
         sleep_func=time.sleep,
     ):
@@ -58,6 +59,7 @@ class RiotClient:
             raise RiotApiError("RIOT_API_KEY가 설정되어 있지 않습니다.")
         self._api_key = api_key
         self._region = region
+        self._platform = platform
         self._timeout = timeout
         self._sleep = sleep_func
         self._client: httpx.Client | None = None
@@ -98,6 +100,39 @@ class RiotClient:
                 f"입력한 Riot ID '{game_name}#{tag_line}'를 찾을 수 없습니다. "
                 "철자와 태그를 다시 확인해주세요."
             ),
+        )
+
+    def get_account_by_puuid(self, puuid: str) -> dict[str, Any]:
+        """PUUID로 Riot ID(gameName, tagLine)를 가져온다."""
+        url = (
+            f"https://{self._region}.api.riotgames.com"
+            f"/riot/account/v1/accounts/by-puuid/{quote(puuid, safe='')}"
+        )
+        return self._get_json(
+            url,
+            not_found_message="PUUID에 해당하는 Riot 계정을 찾을 수 없습니다.",
+        )
+
+    def get_challenger_league(
+        self,
+        queue: str = "RANKED_SOLO_5x5",
+    ) -> dict[str, Any]:
+        """플랫폼 서버의 챌린저 리그 목록을 가져온다."""
+        url = (
+            f"https://{self._platform}.api.riotgames.com"
+            f"/lol/league/v4/challengerleagues/by-queue/{quote(queue, safe='')}"
+        )
+        return self._get_json(url)
+
+    def get_summoner_by_id(self, encrypted_summoner_id: str) -> dict[str, Any]:
+        """encryptedSummonerId로 소환사 정보를 가져온다."""
+        url = (
+            f"https://{self._platform}.api.riotgames.com"
+            f"/lol/summoner/v4/summoners/{quote(encrypted_summoner_id, safe='')}"
+        )
+        return self._get_json(
+            url,
+            not_found_message="소환사 정보를 찾을 수 없습니다.",
         )
 
     def get_match_ids(

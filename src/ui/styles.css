@@ -319,12 +319,33 @@ div[class*="st-key-match_result_card_"] {
     overflow: hidden;
 }
 
+div[class*="st-key-challenger_match_result_card_"] {
+    box-sizing: border-box;
+    margin-bottom: 12px;
+    padding: 14px 16px 18px;
+    border: 1px solid #252a35;
+    border-left: 4px solid #303746;
+    border-radius: 8px;
+    background: #11141b;
+    overflow: hidden;
+}
+
 div[class*="st-key-match_result_card_win_"] {
     border-left-color: #20c997;
     background: #16202e;
 }
 
+div[class*="st-key-challenger_match_result_card_win_"] {
+    border-left-color: #20c997;
+    background: #16202e;
+}
+
 div[class*="st-key-match_result_card_loss_"] {
+    border-left-color: #ff6b6b;
+    background: #251519;
+}
+
+div[class*="st-key-challenger_match_result_card_loss_"] {
     border-left-color: #ff6b6b;
     background: #251519;
 }
@@ -337,7 +358,21 @@ div[class*="st-key-match_result_card_"]
     background: transparent !important;
 }
 
+div[class*="st-key-challenger_match_result_card_"] [data-testid="stVerticalBlock"],
+div[class*="st-key-challenger_match_result_card_"]
+    [data-testid="stElementContainer"],
+div[class*="st-key-challenger_match_result_card_"]
+    [data-testid="column"] {
+    background: transparent !important;
+}
+
 div[class*="st-key-match_result_card_"] [data-testid="stMarkdownContainer"] p {
+    margin: 0;
+}
+
+div[class*="st-key-challenger_match_result_card_"]
+    [data-testid="stMarkdownContainer"]
+    p {
     margin: 0;
 }
 
@@ -504,6 +539,43 @@ div[class*="st-key-match_result_card_"] [data-testid="stMarkdownContainer"] p {
     font-size: 12px;
 }
 
+.player-target {
+    margin-bottom: 10px;
+    padding: 8px 10px;
+    border: 1px solid #252a35;
+    border-radius: 6px;
+    background: rgba(11, 13, 18, 0.35);
+}
+
+.player-target span,
+.player-target strong,
+.player-target em {
+    display: block;
+}
+
+.player-target span {
+    color: #20c997;
+    font-size: 11px;
+    font-weight: 800;
+}
+
+.player-target strong {
+    margin-top: 2px;
+    color: #f1f4f8;
+    font-size: 15px;
+    font-weight: 850;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.player-target em {
+    margin-top: 3px;
+    color: #8d96a8;
+    font-size: 12px;
+    font-style: normal;
+}
+
 div[class*="st-key-match_result_card_"] .stButton > button,
 div[class*="st-key-match_result_card_"] .stLinkButton > a {
     min-height: 34px;
@@ -517,8 +589,27 @@ div[class*="st-key-match_result_card_"] .stLinkButton > a {
     font-weight: 800;
 }
 
+div[class*="st-key-challenger_match_result_card_"] .stButton > button,
+div[class*="st-key-challenger_match_result_card_"] .stLinkButton > a {
+    min-height: 34px;
+    height: 34px;
+    padding: 0 !important;
+    border: 1px solid #303746 !important;
+    border-radius: 6px !important;
+    background: #171c26 !important;
+    color: #dce1ea !important;
+    font-size: 14px;
+    font-weight: 800;
+}
+
 div[class*="st-key-match_result_card_"] .stButton > button:hover,
 div[class*="st-key-match_result_card_"] .stLinkButton > a:hover {
+    border-color: #20c997 !important;
+    color: #ffffff !important;
+}
+
+div[class*="st-key-challenger_match_result_card_"] .stButton > button:hover,
+div[class*="st-key-challenger_match_result_card_"] .stLinkButton > a:hover {
     border-color: #20c997 !important;
     color: #ffffff !important;
 }

@@ -17,6 +17,7 @@ from typing import Any
 
 # Riot ID는 변경 가능하므로 account_cache는 영구 보관하지 않는다.
 ACCOUNT_CACHE_TTL_SECONDS = 7 * 24 * 60 * 60
+SUMMONER_CACHE_TTL_SECONDS = 7 * 24 * 60 * 60
 
 
 class MatchCache:
@@ -60,6 +61,12 @@ class MatchCache:
                 CREATE TABLE IF NOT EXISTS match_timeline_cache (
                     match_id TEXT PRIMARY KEY,
                     raw_json TEXT NOT NULL,
+                    fetched_at INTEGER NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS summoner_cache (
+                    summoner_id TEXT PRIMARY KEY,
+                    puuid TEXT NOT NULL,
                     fetched_at INTEGER NOT NULL
                 );
 
@@ -196,6 +203,38 @@ class MatchCache:
                     fetched_at = excluded.fetched_at
                 """,
                 (match_id, raw_json, now),
+            )
+            conn.commit()
+
+    # --- summoner_cache ---
+    def get_summoner_puuid(self, summoner_id: str) -> str | None:
+        """encryptedSummonerId로 캐시된 PUUID를 가져온다."""
+        now = int(time.time())
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT puuid, fetched_at FROM summoner_cache WHERE summoner_id = ?",
+                (summoner_id,),
+            ).fetchone()
+
+        if row is None:
+            return None
+        if now - row["fetched_at"] > SUMMONER_CACHE_TTL_SECONDS:
+            return None
+        return row["puuid"]
+
+    def save_summoner_puuid(self, summoner_id: str, puuid: str) -> None:
+        """encryptedSummonerId와 PUUID 매핑을 저장한다."""
+        now = int(time.time())
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO summoner_cache (summoner_id, puuid, fetched_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(summoner_id) DO UPDATE SET
+                    puuid = excluded.puuid,
+                    fetched_at = excluded.fetched_at
+                """,
+                (summoner_id, puuid, now),
             )
             conn.commit()
 

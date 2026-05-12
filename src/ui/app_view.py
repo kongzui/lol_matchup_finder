@@ -7,6 +7,13 @@ from datetime import date, timedelta
 import streamlit as st
 
 from src.cache import MatchCache
+from src.challenger_service import (
+    DEFAULT_CHALLENGER_DAYS,
+    DEFAULT_CHALLENGER_TOP_N,
+    DEFAULT_MATCHES_PER_PLAYER,
+    ChallengerSearchRequest,
+    run_challenger_search,
+)
 from src.champions import ChampionData, ChampionRepository
 from src.config import AppConfig
 from src.riot_client import (
@@ -24,6 +31,7 @@ from src.search_service import (
 )
 from src.static_data import StaticData, StaticDataRepository
 from src.ui.components import (
+    render_challenger_results,
     render_matchup_header,
     render_results,
     render_section_title,
@@ -97,6 +105,12 @@ def _render_sidebar(config: AppConfig) -> None:
         st.caption(f"리전: `{config.region}` · 플랫폼: `{config.platform}`")
         st.caption(f"큐 ID: `{config.queue_id}` (솔로 랭크)")
         st.caption(f"DB: `{config.db_path}`")
+
+        st.divider()
+        st.markdown("### 챌린저 대시보드")
+        st.caption(f"기본 랭킹 범위: `상위 {DEFAULT_CHALLENGER_TOP_N}명`")
+        st.caption(f"기본 검색 기간: `최근 {DEFAULT_CHALLENGER_DAYS}일`")
+        st.caption(f"기본 1인당 매치: `{DEFAULT_MATCHES_PER_PLAYER}판`")
 
         st.divider()
         if st.button("챔피언 목록 새로고침", use_container_width=True):
@@ -231,6 +245,89 @@ def _render_search_controls(
     return request, submitted
 
 
+def _render_challenger_controls(
+    champion_data: ChampionData,
+) -> tuple[ChallengerSearchRequest, bool]:
+    """챌린저 매치업 검색 입력 위젯을 그리고 요청 객체를 만든다."""
+    render_section_title("챌린저 검색 조건")
+    with st.container(border=True):
+        default_my = _default_champion(champion_data, "아리")
+        champion_options = ["전체", *champion_data.korean_names]
+
+        c_my, c_enemy, c_lane = st.columns([2.3, 2.3, 1.2])
+        with c_my:
+            my_champion_korean = st.selectbox(
+                "내 챔피언",
+                champion_data.korean_names,
+                index=champion_data.korean_names.index(default_my),
+                key="challenger_my_champion",
+            )
+        with c_enemy:
+            enemy_champion_korean = st.selectbox(
+                "상대 챔피언",
+                champion_options,
+                index=0,
+                key="challenger_enemy_champion",
+            )
+        with c_lane:
+            lane_label = st.selectbox(
+                "라인",
+                LANE_LABELS,
+                index=LANE_LABELS.index("미드"),
+                key="challenger_lane",
+            )
+
+        c_rank, c_days, c_matches = st.columns(3)
+        with c_rank:
+            top_n = st.selectbox(
+                "랭킹 범위",
+                (50, 100, 200, 300),
+                index=(50, 100, 200, 300).index(DEFAULT_CHALLENGER_TOP_N),
+                help="KR 챌린저 랭킹 상위 N명을 조회합니다.",
+                key="challenger_top_n",
+            )
+        with c_days:
+            days = st.selectbox(
+                "검색 기간",
+                (3, 7, 14, 30),
+                index=(3, 7, 14, 30).index(DEFAULT_CHALLENGER_DAYS),
+                format_func=lambda value: f"최근 {value}일",
+                key="challenger_days",
+            )
+        with c_matches:
+            matches_per_player = st.selectbox(
+                "1인당 최대 매치",
+                (20, 50, 100),
+                index=(20, 50, 100).index(DEFAULT_MATCHES_PER_PLAYER),
+                help="플레이어별 최근 솔로 랭크 매치 중 최대 N개를 분석합니다.",
+                key="challenger_matches_per_player",
+            )
+
+        current_patch_only = st.checkbox(
+            "이번 패치만",
+            value=True,
+            help="현재 Data Dragon 패치와 같은 major.minor 버전의 경기만 포함합니다.",
+            key="challenger_current_patch_only",
+        )
+
+        submitted = st.button(
+            "챌린저 검색 실행",
+            type="primary",
+            use_container_width=True,
+        )
+
+    request = ChallengerSearchRequest(
+        my_champion_korean=my_champion_korean,
+        enemy_champion_korean=enemy_champion_korean,
+        lane_label=lane_label,
+        top_n=int(top_n),
+        days=int(days),
+        matches_per_player=int(matches_per_player),
+        current_patch_only=bool(current_patch_only),
+    )
+    return request, submitted
+
+
 def _run_submitted_search(
     *,
     config: AppConfig,
@@ -282,6 +379,54 @@ def _run_submitted_search(
     st.session_state["last_payload"] = payload
 
 
+def _run_submitted_challenger_search(
+    *,
+    config: AppConfig,
+    request: ChallengerSearchRequest,
+    champion_data: ChampionData,
+) -> None:
+    """챌린저 검색 버튼 클릭 시 검색을 실행하고 세션에 결과를 저장한다."""
+    progress_bar = st.progress(0.0)
+    status_box = st.empty()
+    cache = get_match_cache(config.db_path, CACHE_VERSION)
+
+    def progress_cb(value: float) -> None:
+        progress_bar.progress(min(max(value, 0.0), 1.0))
+
+    def status_cb(message: str) -> None:
+        status_box.info(message)
+
+    try:
+        payload = run_challenger_search(
+            config=config,
+            request=request,
+            champion_data=champion_data,
+            cache=cache,
+            progress_cb=progress_cb,
+            status_cb=status_cb,
+        )
+    except RiotApiAuthError as exc:
+        st.error(str(exc))
+        return
+    except RiotApiNotFound as exc:
+        st.error(str(exc))
+        return
+    except RiotApiRateLimited as exc:
+        st.error(
+            str(exc)
+            + "\n이미 조회한 경기는 캐시에서 재사용되므로 다시 시도하면 더 빠릅니다."
+        )
+        return
+    except RiotApiError as exc:
+        st.error(str(exc))
+        return
+    finally:
+        status_box.empty()
+        progress_bar.empty()
+
+    st.session_state["last_challenger_payload"] = payload
+
+
 def render_app(config: AppConfig) -> None:
     """전체 Streamlit 앱 화면을 렌더링한다."""
     _render_sidebar(config)
@@ -292,31 +437,56 @@ def render_app(config: AppConfig) -> None:
     champion_data, static_data = loaded
     cache = get_match_cache(config.db_path, CACHE_VERSION)
     default_riot_id = cache.get_latest_search_riot_id()
-    header_slot = st.empty()
-    request, submitted = _render_search_controls(champion_data, default_riot_id)
+    riot_tab, challenger_tab = st.tabs(["Riot ID 검색", "챌린저 매치업"])
 
-    my_key = champion_data.to_english_key(request.my_champion_korean)
-    enemy_key = champion_data.to_english_key(request.enemy_champion_korean)
-    with header_slot.container():
-        render_matchup_header(
-            riot_id_raw=request.riot_id_raw,
-            lane_label=request.lane_label,
-            period_kind=request.period_kind,
-            max_matches=request.max_matches,
-            my_champion_korean=request.my_champion_korean,
-            enemy_champion_korean=request.enemy_champion_korean,
-            my_champion_key=my_key,
-            enemy_champion_key=enemy_key,
-            champion_version=champion_data.version,
+    with riot_tab:
+        header_slot = st.empty()
+        request, submitted = _render_search_controls(champion_data, default_riot_id)
+
+        my_key = champion_data.to_english_key(request.my_champion_korean)
+        enemy_key = champion_data.to_english_key(request.enemy_champion_korean)
+        with header_slot.container():
+            render_matchup_header(
+                riot_id_raw=request.riot_id_raw,
+                lane_label=request.lane_label,
+                period_kind=request.period_kind,
+                max_matches=request.max_matches,
+                my_champion_korean=request.my_champion_korean,
+                enemy_champion_korean=request.enemy_champion_korean,
+                my_champion_key=my_key,
+                enemy_champion_key=enemy_key,
+                champion_version=champion_data.version,
+            )
+
+        if submitted:
+            _run_submitted_search(
+                config=config,
+                request=request,
+                champion_data=champion_data,
+            )
+
+        payload = st.session_state.get("last_payload")
+        if payload is not None:
+            render_results(payload, champion_data, cache, static_data, config)
+
+    with challenger_tab:
+        challenger_request, challenger_submitted = _render_challenger_controls(
+            champion_data,
         )
 
-    if submitted:
-        _run_submitted_search(
-            config=config,
-            request=request,
-            champion_data=champion_data,
-        )
+        if challenger_submitted:
+            _run_submitted_challenger_search(
+                config=config,
+                request=challenger_request,
+                champion_data=champion_data,
+            )
 
-    payload = st.session_state.get("last_payload")
-    if payload is not None:
-        render_results(payload, champion_data, cache, static_data, config)
+        challenger_payload = st.session_state.get("last_challenger_payload")
+        if challenger_payload is not None:
+            render_challenger_results(
+                challenger_payload,
+                champion_data,
+                cache,
+                static_data,
+                config,
+            )

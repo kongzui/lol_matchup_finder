@@ -7,12 +7,17 @@ from html import escape
 from typing import Any
 
 import streamlit as st
-from streamlit.components.v1 import html as components_html
 
 from src.cache import MatchCache
+from src.challenger_service import ChallengerSearchPayload
 from src.champions import ChampionData, champion_icon_url
 from src.config import AppConfig
-from src.export import build_results_csv_bytes, build_results_filename
+from src.export import (
+    build_challenger_results_csv_bytes,
+    build_challenger_results_filename,
+    build_results_csv_bytes,
+    build_results_filename,
+)
 from src.matchup_filter import extract_focus_view
 from src.opgg import build_opgg_url
 from src.riot_client import RiotApiError, RiotClient
@@ -40,6 +45,15 @@ def _split_riot_id(row: dict[str, Any]) -> tuple[str, str]:
         row["enemy_riot_id"].split("#", 1)[1]
         if "#" in row.get("enemy_riot_id", "")
         else ""
+    )
+    return name, tag
+
+
+def _split_player_riot_id(row: dict[str, Any]) -> tuple[str, str]:
+    riot_id = str(row.get("player_riot_id") or "")
+    name = row.get("player_game_name") or riot_id.split("#", 1)[0]
+    tag = row.get("player_tag_line") or (
+        riot_id.split("#", 1)[1] if "#" in riot_id else ""
     )
     return name, tag
 
@@ -147,6 +161,44 @@ def render_result_summary(payload: SearchPayload, champion_data: ChampionData) -
     )
 
 
+def render_challenger_result_summary(
+    payload: ChallengerSearchPayload,
+    champion_data: ChampionData,
+) -> None:
+    """챌린저 검색 결과 요약과 KPI를 표시한다."""
+    results = payload.results
+    wins = sum(1 for row in results if row["win"])
+    total = len(results)
+    losses = total - wins
+    winrate = f"{(wins / total * 100):.1f}%" if total else "-"
+    my_ko = champion_data.to_korean_name(payload.my_champion_key)
+    enemy_ko = (
+        champion_data.to_korean_name(payload.enemy_champion_key)
+        if payload.enemy_champion_key
+        else "전체"
+    )
+    patch_text = payload.patch_prefix or "전체 패치"
+
+    st.markdown(
+        f"""
+<section class="result-summary">
+  <div class="summary-main">
+    <span>챌린저 매치업</span>
+    <strong>상위 {payload.top_n}명 · {my_ko} vs {enemy_ko}</strong>
+    <p>{_h(payload.lane_label)} · {_h(payload.period_label)} · 패치 {_h(patch_text)}</p>
+  </div>
+  <div class="kpi-row">
+    <div class="kpi-card primary"><span>발견</span><strong>{total}</strong><em>경기</em></div>
+    <div class="kpi-card"><span>승률</span><strong>{winrate}</strong><em>{wins}승 {losses}패</em></div>
+    <div class="kpi-card"><span>스캔</span><strong>{payload.scanned_players}</strong><em>플레이어</em></div>
+    <div class="kpi-card"><span>매치/API</span><strong>{payload.scanned_matches} / {payload.api_calls}</strong><em>캐시 {payload.cache_hits}</em></div>
+  </div>
+</section>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def render_empty_state() -> None:
     """조건에 맞는 결과가 없을 때 안내를 표시한다."""
     st.markdown(
@@ -168,6 +220,7 @@ def render_result_card(
     detail_id: str,
     row_index: int,
     detail_open: bool = False,
+    key_prefix: str = "match_detail",
 ) -> None:
     """결과 카드 요약을 Streamlit 네이티브 요소로 표시한다."""
     result_cls = "win" if row["win"] else "loss"
@@ -197,6 +250,9 @@ def render_result_card(
     enemy_name, enemy_tag = _split_riot_id(row)
     enemy_riot_id = f"{enemy_name}#{enemy_tag}" if enemy_tag else enemy_name
     enemy_opgg_url = build_opgg_url(enemy_name, enemy_tag) if enemy_tag else ""
+    player_name, player_tag = _split_player_riot_id(row)
+    player_riot_id = f"{player_name}#{player_tag}" if player_tag else player_name
+    is_challenger_row = bool(row.get("player_puuid"))
     side_icons_html = _result_side_icons_html(row, static_data)
     loadout_html = _result_loadout_html(row, static_data)
     champion_level = int(row.get("my_champion_level") or 0)
@@ -220,6 +276,19 @@ def render_result_card(
         )
 
     with summary_col:
+        if is_challenger_row:
+            rank_text = row.get("player_rank")
+            lp_text = row.get("player_league_points")
+            st.markdown(
+                f"""
+<div class="player-target">
+  <span>챌린저 플레이어</span>
+  <strong>{_h(player_name)}</strong>
+  <em>#{_h(player_tag)} · {rank_text}위 · {lp_text} LP</em>
+</div>
+                """,
+                unsafe_allow_html=True,
+            )
         st.markdown(
             f"""
 <div class="my-summary">
@@ -255,9 +324,20 @@ def render_result_card(
         )
 
     with action_col:
-        copy_col, opgg_col, detail_col = st.columns(3, gap="small")
-        with copy_col:
-            components_html(_copy_riot_id_button_html(enemy_riot_id), height=36)
+        if is_challenger_row:
+            player_copy_col, enemy_copy_col, opgg_col, detail_col = st.columns(
+                4,
+                gap="small",
+            )
+            with player_copy_col:
+                st.iframe(_copy_riot_id_button_html(player_riot_id), height=36)
+            with enemy_copy_col:
+                st.iframe(_copy_riot_id_button_html(enemy_riot_id), height=36)
+        else:
+            enemy_copy_col, opgg_col, detail_col = st.columns(3, gap="small")
+            with enemy_copy_col:
+                st.iframe(_copy_riot_id_button_html(enemy_riot_id), height=36)
+
         with opgg_col:
             st.link_button(
                 "↗",
@@ -269,7 +349,7 @@ def render_result_card(
         with detail_col:
             st.button(
                 "▴" if detail_open else "▾",
-                key=f"match_detail_toggle_{row_index}",
+                key=f"{key_prefix}_toggle_{row_index}",
                 help="매치 상세 닫기" if detail_open else "매치 상세 펼치기",
                 on_click=_toggle_match_detail,
                 args=(detail_id,),
@@ -446,6 +526,68 @@ def _render_linked_match_detail(
     st.markdown(detail_html, unsafe_allow_html=True)
 
 
+def _render_challenger_linked_match_detail(
+    *,
+    row: dict[str, Any],
+    champion_data: ChampionData,
+    cache: MatchCache,
+    static_data: StaticData,
+    config: AppConfig,
+) -> None:
+    """챌린저 결과 카드 아래에 연결형 매치 상세를 표시한다."""
+    match_full = cache.get_match(row["match_id"]) if row.get("match_id") else None
+    player_puuid = row.get("player_puuid")
+    focus = (
+        extract_focus_view(match_full, player_puuid)
+        if match_full and player_puuid
+        else None
+    )
+    if focus is None:
+        st.markdown(
+            """
+<div class="linked-detail-empty">
+  이 매치의 상세 데이터를 찾을 수 없습니다.
+</div>
+            """,
+            unsafe_allow_html=True,
+        )
+        return
+
+    match_id = row.get("match_id") or ""
+    timeline = cache.get_match_timeline(match_id) if match_id else None
+    if timeline is None and match_id:
+        try:
+            with RiotClient(
+                api_key=config.api_key,
+                region=config.region,
+                platform=config.platform,
+            ) as client:
+                timeline = fetch_match_timeline(client, cache, match_id)
+        except RiotApiError as exc:
+            st.warning(f"타임라인을 불러오지 못했습니다: {exc}")
+
+    build_timeline = (
+        extract_player_build_timeline(
+            match_full,
+            timeline,
+            player_puuid,
+        )
+        if timeline is not None
+        else None
+    )
+    detail_html = render_match_detail(
+        focus,
+        champion_data,
+        static_data,
+        build_timeline,
+    ).replace(
+        '<div class="detail-panel">',
+        '<div class="detail-panel linked-detail-panel">',
+        1,
+    )
+    st.markdown(detail_html, unsafe_allow_html=True)
+
+
 def render_results(
     payload: SearchPayload,
     champion_data: ChampionData,
@@ -513,6 +655,67 @@ def render_results(
         label="CSV 다운로드",
         data=build_results_csv_bytes(payload),
         file_name=build_results_filename(payload),
+        mime="text/csv",
+        use_container_width=True,
+    )
+
+
+def render_challenger_results(
+    payload: ChallengerSearchPayload,
+    champion_data: ChampionData,
+    cache: MatchCache,
+    static_data: StaticData,
+    config: AppConfig,
+) -> None:
+    """챌린저 검색 결과 요약, 목록, 상세 패널, CSV 다운로드를 표시한다."""
+    render_challenger_result_summary(payload, champion_data)
+
+    if not payload.results:
+        render_empty_state()
+        return
+
+    render_section_title("챌린저 결과 목록")
+    detail_ids = [
+        f"challenger-{row.get('match_id') or idx}-{row.get('player_puuid') or idx}"
+        for idx, row in enumerate(payload.results)
+    ]
+    valid_detail_ids = set(detail_ids)
+    open_ids = (
+        set(st.session_state.get(_MATCH_DETAIL_OPEN_STATE_KEY, [])) & valid_detail_ids
+    )
+    st.session_state[_MATCH_DETAIL_OPEN_STATE_KEY] = sorted(open_ids)
+
+    for idx, (row, detail_id) in enumerate(
+        zip(payload.results, detail_ids, strict=True)
+    ):
+        detail_open = detail_id in open_ids
+
+        with st.container(
+            border=False,
+            key=f"challenger_match_result_card_{'win' if row['win'] else 'loss'}_{idx}",
+        ):
+            render_result_card(
+                row,
+                champion_data,
+                static_data,
+                detail_id=detail_id,
+                row_index=idx,
+                detail_open=detail_open,
+                key_prefix="challenger_match_detail",
+            )
+            if detail_open:
+                _render_challenger_linked_match_detail(
+                    row=row,
+                    champion_data=champion_data,
+                    cache=cache,
+                    static_data=static_data,
+                    config=config,
+                )
+
+    st.download_button(
+        label="CSV 다운로드",
+        data=build_challenger_results_csv_bytes(payload),
+        file_name=build_challenger_results_filename(payload),
         mime="text/csv",
         use_container_width=True,
     )
