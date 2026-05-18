@@ -9,7 +9,6 @@ from typing import Any
 import streamlit as st
 
 from src.cache import MatchCache
-from src.challenger_service import ChallengerSearchPayload
 from src.champions import ChampionData, champion_icon_url
 from src.config import AppConfig
 from src.db_search_service import IndexedMatchupSearchPayload
@@ -20,6 +19,7 @@ from src.export import (
     build_results_filename,
 )
 from src.matchup_filter import extract_focus_view
+from src.multi_search_service import MultiSearchPayload
 from src.opgg import build_opgg_url
 from src.riot_client import RiotApiError, RiotClient
 from src.search_service import SearchPayload, fetch_match_timeline
@@ -168,23 +168,23 @@ def render_result_summary(payload: SearchPayload, champion_data: ChampionData) -
     )
 
 
-def render_challenger_result_summary(
-    payload: ChallengerSearchPayload,
+def render_multi_search_result_summary(
+    payload: MultiSearchPayload,
 ) -> None:
-    """챌린저 수집 결과 요약과 KPI를 표시한다."""
+    """멀티서치 수집 결과 요약과 KPI를 표시한다."""
     st.markdown(
         f"""
 <section class="result-summary">
   <div class="summary-main">
-    <span>챌린저 수집</span>
-    <strong>상위 {payload.top_n}명 · {payload.period_label}</strong>
-    <p>고티어 match_cache 저장 후 matchup_index에 반영했습니다.</p>
+    <span>멀티서치 수집</span>
+    <strong>{payload.input_count}명 입력 · {payload.period_label}</strong>
+    <p>직접 입력한 유저의 솔로 랭크 match_cache를 저장하고 matchup_index에 반영했습니다.</p>
   </div>
   <div class="kpi-row">
     <div class="kpi-card primary"><span>인덱스</span><strong>{payload.indexed_rows}</strong><em>row</em></div>
-    <div class="kpi-card"><span>스캔</span><strong>{payload.scanned_players}</strong><em>플레이어</em></div>
-    <div class="kpi-card"><span>매치/API</span><strong>{payload.scanned_matches} / {payload.api_calls}</strong><em>신규 상세 {payload.new_match_details} · 캐시 {payload.cache_hits}</em></div>
-    <div class="kpi-card"><span>랭킹 변화</span><strong>+{payload.new_challengers} / -{payload.deactivated_challengers}</strong><em>복귀 {payload.reactivated_challengers}</em></div>
+    <div class="kpi-card"><span>성공 / 실패</span><strong>{payload.success_count} / {payload.failure_count}</strong><em>유저</em></div>
+    <div class="kpi-card"><span>매치/API</span><strong>{payload.discovered_matches} / {payload.api_calls}</strong><em>신규 상세 {payload.new_match_details}</em></div>
+    <div class="kpi-card"><span>캐시</span><strong>{payload.cache_hits}</strong><em>hit</em></div>
   </div>
 </section>
         """,
@@ -562,7 +562,7 @@ def _render_linked_match_detail(
     st.markdown(detail_html, unsafe_allow_html=True)
 
 
-def _render_challenger_linked_match_detail(
+def _render_indexed_linked_match_detail(
     *,
     row: dict[str, Any],
     champion_data: ChampionData,
@@ -570,7 +570,7 @@ def _render_challenger_linked_match_detail(
     static_data: StaticData,
     config: AppConfig,
 ) -> None:
-    """챌린저 결과 카드 아래에 연결형 매치 상세를 표시한다."""
+    """인덱스 결과 카드 아래에 연결형 매치 상세를 표시한다."""
     match_full = cache.get_match(row["match_id"]) if row.get("match_id") else None
     player_puuid = row.get("player_puuid")
     focus = (
@@ -696,13 +696,17 @@ def render_results(
     )
 
 
-def render_challenger_results(
-    payload: ChallengerSearchPayload,
-    cache: MatchCache,
+def render_multi_search_results(
+    payload: MultiSearchPayload,
 ) -> None:
-    """챌린저 수집 결과 요약을 표시한다."""
-    _ = cache
-    render_challenger_result_summary(payload)
+    """멀티서치 수집 결과 요약과 실패 목록을 표시한다."""
+    render_multi_search_result_summary(payload)
+    if not payload.failures:
+        return
+
+    render_section_title("수집 실패 목록")
+    for failure in payload.failures:
+        st.warning(f"{failure.riot_id_raw}: {failure.reason}")
 
 
 def render_indexed_matchup_results(
@@ -749,7 +753,7 @@ def render_indexed_matchup_results(
                 key_prefix="indexed_match_detail",
             )
             if detail_open:
-                _render_challenger_linked_match_detail(
+                _render_indexed_linked_match_detail(
                     row=row,
                     champion_data=champion_data,
                     cache=cache,

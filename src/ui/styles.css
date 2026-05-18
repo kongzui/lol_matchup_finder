@@ -319,7 +319,7 @@ div[class*="st-key-match_result_card_"] {
     overflow: hidden;
 }
 
-div[class*="st-key-challenger_match_result_card_"] {
+div[class*="st-key-indexed_match_result_card_"] {
     box-sizing: border-box;
     margin-bottom: 12px;
     padding: 14px 16px 18px;
@@ -335,7 +335,7 @@ div[class*="st-key-match_result_card_win_"] {
     background: #16202e;
 }
 
-div[class*="st-key-challenger_match_result_card_win_"] {
+div[class*="st-key-indexed_match_result_card_win_"] {
     border-left-color: #20c997;
     background: #16202e;
 }
@@ -345,7 +345,7 @@ div[class*="st-key-match_result_card_loss_"] {
     background: #251519;
 }
 
-div[class*="st-key-challenger_match_result_card_loss_"] {
+div[class*="st-key-indexed_match_result_card_loss_"] {
     border-left-color: #ff6b6b;
     background: #251519;
 }
@@ -358,10 +358,10 @@ div[class*="st-key-match_result_card_"]
     background: transparent !important;
 }
 
-div[class*="st-key-challenger_match_result_card_"] [data-testid="stVerticalBlock"],
-div[class*="st-key-challenger_match_result_card_"]
+div[class*="st-key-indexed_match_result_card_"] [data-testid="stVerticalBlock"],
+div[class*="st-key-indexed_match_result_card_"]
     [data-testid="stElementContainer"],
-div[class*="st-key-challenger_match_result_card_"]
+div[class*="st-key-indexed_match_result_card_"]
     [data-testid="column"] {
     background: transparent !important;
 }
@@ -370,7 +370,7 @@ div[class*="st-key-match_result_card_"] [data-testid="stMarkdownContainer"] p {
     margin: 0;
 }
 
-div[class*="st-key-challenger_match_result_card_"]
+div[class*="st-key-indexed_match_result_card_"]
     [data-testid="stMarkdownContainer"]
     p {
     margin: 0;
@@ -589,8 +589,8 @@ div[class*="st-key-match_result_card_"] .stLinkButton > a {
     font-weight: 800;
 }
 
-div[class*="st-key-challenger_match_result_card_"] .stButton > button,
-div[class*="st-key-challenger_match_result_card_"] .stLinkButton > a {
+div[class*="st-key-indexed_match_result_card_"] .stButton > button,
+div[class*="st-key-indexed_match_result_card_"] .stLinkButton > a {
     min-height: 34px;
     height: 34px;
     padding: 0 !important;
@@ -608,8 +608,8 @@ div[class*="st-key-match_result_card_"] .stLinkButton > a:hover {
     color: #ffffff !important;
 }
 
-div[class*="st-key-challenger_match_result_card_"] .stButton > button:hover,
-div[class*="st-key-challenger_match_result_card_"] .stLinkButton > a:hover {
+div[class*="st-key-indexed_match_result_card_"] .stButton > button:hover,
+div[class*="st-key-indexed_match_result_card_"] .stLinkButton > a:hover {
     border-color: #20c997 !important;
     color: #ffffff !important;
 }

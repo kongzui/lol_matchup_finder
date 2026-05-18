@@ -113,17 +113,6 @@ class RiotClient:
             not_found_message="PUUID에 해당하는 Riot 계정을 찾을 수 없습니다.",
         )
 
-    def get_challenger_league(
-        self,
-        queue: str = "RANKED_SOLO_5x5",
-    ) -> dict[str, Any]:
-        """플랫폼 서버의 챌린저 리그 목록을 가져온다."""
-        url = (
-            f"https://{self._platform}.api.riotgames.com"
-            f"/lol/league/v4/challengerleagues/by-queue/{quote(queue, safe='')}"
-        )
-        return self._get_json(url)
-
     def get_summoner_by_id(self, encrypted_summoner_id: str) -> dict[str, Any]:
         """encryptedSummonerId로 소환사 정보를 가져온다."""
         url = (

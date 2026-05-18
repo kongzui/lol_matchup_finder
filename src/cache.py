@@ -96,47 +96,10 @@ class MatchCache:
                     last_seen_at INTEGER NOT NULL
                 );
 
-                CREATE TABLE IF NOT EXISTS collection_seed (
-                    puuid TEXT NOT NULL,
-                    source TEXT NOT NULL,
-                    source_champion_key TEXT NOT NULL DEFAULT '',
-                    priority INTEGER NOT NULL DEFAULT 0,
-                    is_active INTEGER NOT NULL DEFAULT 1,
-                    last_collected_at INTEGER,
-                    last_seen_as_source_at INTEGER,
-                    inactive_at INTEGER,
-                    created_at INTEGER NOT NULL,
-                    updated_at INTEGER NOT NULL,
-                    PRIMARY KEY (puuid, source, source_champion_key)
-                );
-
-                CREATE TABLE IF NOT EXISTS challenger_snapshot_runs (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    queue TEXT NOT NULL,
-                    top_n INTEGER NOT NULL,
-                    fetched_at INTEGER NOT NULL
-                );
-
-                CREATE TABLE IF NOT EXISTS challenger_player_snapshots (
-                    snapshot_id INTEGER NOT NULL,
-                    puuid TEXT NOT NULL,
-                    rank INTEGER NOT NULL,
-                    league_points INTEGER NOT NULL,
-                    wins INTEGER NOT NULL,
-                    losses INTEGER NOT NULL,
-                    PRIMARY KEY (snapshot_id, puuid)
-                );
-
-                CREATE TABLE IF NOT EXISTS challenger_players_current (
-                    puuid TEXT PRIMARY KEY,
-                    rank INTEGER,
-                    league_points INTEGER,
-                    wins INTEGER,
-                    losses INTEGER,
-                    is_current INTEGER NOT NULL DEFAULT 1,
-                    last_snapshot_id INTEGER,
-                    last_seen_at INTEGER
-                );
+                DROP TABLE IF EXISTS collection_seed;
+                DROP TABLE IF EXISTS challenger_snapshot_runs;
+                DROP TABLE IF EXISTS challenger_player_snapshots;
+                DROP TABLE IF EXISTS challenger_players_current;
 
                 CREATE TABLE IF NOT EXISTS ranked_profile_cache (
                     puuid TEXT NOT NULL,
@@ -156,6 +119,19 @@ class MatchCache:
                     source TEXT NOT NULL,
                     discovered_at INTEGER NOT NULL,
                     PRIMARY KEY (match_id, source_puuid, source)
+                );
+
+                DELETE FROM match_discovery
+                WHERE source = 'challenger';
+
+                CREATE TABLE IF NOT EXISTS manual_collection_user (
+                    puuid TEXT PRIMARY KEY,
+                    riot_id_game_name TEXT,
+                    riot_id_tag_line TEXT,
+                    is_active INTEGER NOT NULL DEFAULT 1,
+                    last_collected_at INTEGER,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL
                 );
 
                 CREATE TABLE IF NOT EXISTS matchup_index (
@@ -474,7 +450,7 @@ class MatchCache:
             )
             conn.commit()
 
-    # --- match_discovery / collection_seed / challenger snapshot ---
+    # --- match_discovery / manual_collection_user ---
     def record_match_discovery(
         self,
         *,
@@ -495,173 +471,65 @@ class MatchCache:
             )
             conn.commit()
 
-    def save_challenger_snapshot(
-        self,
-        *,
-        queue: str,
-        top_n: int,
-        players: list[dict[str, Any]],
-    ) -> dict[str, int]:
-        """챌린저 스냅샷과 현재 seed 활성 상태를 갱신한다."""
-        now = int(time.time())
-        player_puuids = {
-            str(player["puuid"]) for player in players if player.get("puuid")
-        }
-
-        with self._connect() as conn:
-            existing_rows = conn.execute(
-                """
-                SELECT puuid, is_current
-                FROM challenger_players_current
-                """
-            ).fetchall()
-            known_puuids = {row["puuid"] for row in existing_rows}
-            active_before = {row["puuid"] for row in existing_rows if row["is_current"]}
-
-            cursor = conn.execute(
-                """
-                INSERT INTO challenger_snapshot_runs (queue, top_n, fetched_at)
-                VALUES (?, ?, ?)
-                """,
-                (queue, top_n, now),
-            )
-            snapshot_id = int(cursor.lastrowid)
-
-            for player in players:
-                puuid = player.get("puuid")
-                if not puuid:
-                    continue
-                conn.execute(
-                    """
-                    INSERT INTO challenger_player_snapshots (
-                        snapshot_id, puuid, rank, league_points, wins, losses
-                    ) VALUES (?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(snapshot_id, puuid) DO UPDATE SET
-                        rank = excluded.rank,
-                        league_points = excluded.league_points,
-                        wins = excluded.wins,
-                        losses = excluded.losses
-                    """,
-                    (
-                        snapshot_id,
-                        puuid,
-                        int(player.get("rank") or 0),
-                        int(player.get("league_points") or 0),
-                        int(player.get("wins") or 0),
-                        int(player.get("losses") or 0),
-                    ),
-                )
-                conn.execute(
-                    """
-                    INSERT INTO challenger_players_current (
-                        puuid, rank, league_points, wins, losses,
-                        is_current, last_snapshot_id, last_seen_at
-                    ) VALUES (?, ?, ?, ?, ?, 1, ?, ?)
-                    ON CONFLICT(puuid) DO UPDATE SET
-                        rank = excluded.rank,
-                        league_points = excluded.league_points,
-                        wins = excluded.wins,
-                        losses = excluded.losses,
-                        is_current = 1,
-                        last_snapshot_id = excluded.last_snapshot_id,
-                        last_seen_at = excluded.last_seen_at
-                    """,
-                    (
-                        puuid,
-                        int(player.get("rank") or 0),
-                        int(player.get("league_points") or 0),
-                        int(player.get("wins") or 0),
-                        int(player.get("losses") or 0),
-                        snapshot_id,
-                        now,
-                    ),
-                )
-                conn.execute(
-                    """
-                    INSERT INTO collection_seed (
-                        puuid, source, source_champion_key, priority, is_active,
-                        last_seen_as_source_at, inactive_at, created_at, updated_at
-                    ) VALUES (?, 'challenger', '', ?, 1, ?, NULL, ?, ?)
-                    ON CONFLICT(puuid, source, source_champion_key) DO UPDATE SET
-                        priority = excluded.priority,
-                        is_active = 1,
-                        last_seen_as_source_at = excluded.last_seen_as_source_at,
-                        inactive_at = NULL,
-                        updated_at = excluded.updated_at
-                    """,
-                    (puuid, int(player.get("rank") or 0), now, now, now),
-                )
-
-            if player_puuids:
-                placeholders = ",".join("?" for _ in player_puuids)
-                conn.execute(
-                    f"""
-                    UPDATE challenger_players_current
-                    SET is_current = 0
-                    WHERE puuid NOT IN ({placeholders})
-                    """,
-                    tuple(player_puuids),
-                )
-                conn.execute(
-                    f"""
-                    UPDATE collection_seed
-                    SET is_active = 0,
-                        inactive_at = COALESCE(inactive_at, ?),
-                        updated_at = ?
-                    WHERE source = 'challenger'
-                      AND source_champion_key = ''
-                      AND puuid NOT IN ({placeholders})
-                    """,
-                    (now, now, *tuple(player_puuids)),
-                )
-
-            new_count = len(player_puuids - known_puuids)
-            reactivated_puuids = (
-                player_puuids - active_before - (player_puuids - known_puuids)
-            )
-            reactivated_count = len(reactivated_puuids)
-            deactivated_count = len(active_before - player_puuids)
-            conn.commit()
-
-        return {
-            "snapshot_id": snapshot_id,
-            "new_count": new_count,
-            "reactivated_count": reactivated_count,
-            "deactivated_count": deactivated_count,
-        }
-
-    def get_active_collection_seeds(self, source: str) -> list[dict[str, Any]]:
-        """활성 수집 seed 목록을 반환한다."""
-        with self._connect() as conn:
-            rows = conn.execute(
-                """
-                SELECT puuid, source, source_champion_key, priority, last_collected_at
-                FROM collection_seed
-                WHERE source = ? AND is_active = 1
-                ORDER BY priority ASC, updated_at DESC
-                """,
-                (source,),
-            ).fetchall()
-        return [dict(row) for row in rows]
-
-    def mark_seed_collected(
+    def save_manual_collection_user(
         self,
         *,
         puuid: str,
-        source: str,
-        source_champion_key: str = "",
-        collected_at: int | None = None,
+        game_name: str | None,
+        tag_line: str | None,
     ) -> None:
-        """seed의 마지막 수집 시각을 갱신한다."""
+        """멀티서치 수동 수집 대상 유저를 저장한다."""
         now = int(time.time())
         with self._connect() as conn:
             conn.execute(
                 """
-                UPDATE collection_seed
-                SET last_collected_at = ?, updated_at = ?
-                WHERE puuid = ? AND source = ? AND source_champion_key = ?
+                INSERT INTO manual_collection_user (
+                    puuid, riot_id_game_name, riot_id_tag_line,
+                    is_active, created_at, updated_at
+                ) VALUES (?, ?, ?, 1, ?, ?)
+                ON CONFLICT(puuid) DO UPDATE SET
+                    riot_id_game_name = excluded.riot_id_game_name,
+                    riot_id_tag_line = excluded.riot_id_tag_line,
+                    is_active = 1,
+                    updated_at = excluded.updated_at
                 """,
-                (collected_at or now, now, puuid, source, source_champion_key),
+                (puuid, game_name, tag_line, now, now),
+            )
+            conn.commit()
+
+    def get_manual_collection_users(self) -> list[dict[str, Any]]:
+        """활성 멀티서치 수동 수집 대상 유저 목록을 반환한다."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    puuid,
+                    riot_id_game_name,
+                    riot_id_tag_line,
+                    last_collected_at
+                FROM manual_collection_user
+                WHERE is_active = 1
+                ORDER BY updated_at DESC
+                """
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def mark_manual_collection_user_collected(
+        self,
+        *,
+        puuid: str,
+        collected_at: int | None = None,
+    ) -> None:
+        """멀티서치 수동 수집 대상의 마지막 수집 시각을 갱신한다."""
+        now = int(time.time())
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE manual_collection_user
+                SET last_collected_at = ?, updated_at = ?
+                WHERE puuid = ?
+                """,
+                (collected_at or now, now, puuid),
             )
             conn.commit()
 
@@ -817,14 +685,8 @@ class MatchCache:
         with self._connect() as conn:
             rows = conn.execute(
                 f"""
-                SELECT
-                    mi.*,
-                    cpc.rank AS player_rank,
-                    cpc.league_points AS player_league_points
+                SELECT mi.*
                 FROM matchup_index mi
-                LEFT JOIN challenger_players_current cpc
-                    ON cpc.puuid = mi.player_puuid
-                   AND cpc.is_current = 1
                 WHERE {where_sql}
                 ORDER BY mi.game_creation DESC
                 LIMIT ?
@@ -864,7 +726,7 @@ class MatchCache:
                 LEFT JOIN ranked_profile_cache rpc
                     ON rpc.puuid = md.source_puuid
                    AND rpc.queue_id = ?
-                WHERE md.source = 'challenger'
+                WHERE md.source = 'manual_multi'
                    OR (
                         md.source = 'manual_user'
                     AND rpc.tier IS NOT NULL
@@ -884,7 +746,7 @@ class MatchCache:
                 ((match.get("metadata") or {}).get("matchId")) or ""
             )
             can_index = any(
-                discovery["source"] == "challenger" for discovery in discoveries
+                discovery["source"] == "manual_multi" for discovery in discoveries
             )
             if not can_index:
                 for discovery in discoveries:

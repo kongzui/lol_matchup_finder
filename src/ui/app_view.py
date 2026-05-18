@@ -7,13 +7,6 @@ from datetime import date, timedelta
 import streamlit as st
 
 from src.cache import MatchCache
-from src.challenger_service import (
-    DEFAULT_CHALLENGER_DAYS,
-    DEFAULT_CHALLENGER_TOP_N,
-    DEFAULT_MATCHES_PER_PLAYER,
-    ChallengerSearchRequest,
-    run_challenger_search,
-)
 from src.champions import ChampionData, ChampionRepository
 from src.config import AppConfig
 from src.db_search_service import (
@@ -21,6 +14,14 @@ from src.db_search_service import (
     DB_LIMIT_OPTIONS,
     IndexedMatchupSearchRequest,
     run_indexed_matchup_search,
+)
+from src.multi_search_service import (
+    DEFAULT_MULTI_MATCHES_PER_PLAYER,
+    DEFAULT_MULTI_SEARCH_DAYS,
+    MULTI_MATCHES_PER_PLAYER_OPTIONS,
+    MULTI_PERIOD_OPTIONS,
+    MultiSearchRequest,
+    run_multi_search,
 )
 from src.riot_client import (
     RiotApiAuthError,
@@ -37,9 +38,9 @@ from src.search_service import (
 )
 from src.static_data import StaticData, StaticDataRepository
 from src.ui.components import (
-    render_challenger_results,
     render_indexed_matchup_results,
     render_matchup_header,
+    render_multi_search_results,
     render_results,
     render_section_title,
 )
@@ -114,10 +115,9 @@ def _render_sidebar(config: AppConfig) -> None:
         st.caption(f"DB: `{config.db_path}`")
 
         st.divider()
-        st.markdown("### 챌린저 수집")
-        st.caption(f"기본 랭킹 범위: `상위 {DEFAULT_CHALLENGER_TOP_N}명`")
-        st.caption(f"기본 수집 기간: `최근 {DEFAULT_CHALLENGER_DAYS}일`")
-        st.caption(f"기본 1인당 매치: `{DEFAULT_MATCHES_PER_PLAYER}판`")
+        st.markdown("### 멀티서치")
+        st.caption(f"기본 수집 기간: `최근 {DEFAULT_MULTI_SEARCH_DAYS}일`")
+        st.caption(f"기본 1인당 매치: `{DEFAULT_MULTI_MATCHES_PER_PLAYER}판`")
 
         st.divider()
         if st.button("챔피언 목록 새로고침", use_container_width=True):
@@ -252,44 +252,63 @@ def _render_search_controls(
     return request, submitted
 
 
-def _render_challenger_controls() -> tuple[ChallengerSearchRequest, bool]:
-    """챌린저 수집 입력 위젯을 그리고 요청 객체를 만든다."""
-    render_section_title("챌린저 수집 조건")
+def _format_manual_users(cache: MatchCache) -> str:
+    """저장된 멀티서치 수동 유저를 textarea 기본값으로 만든다."""
+    riot_ids = []
+    for row in cache.get_manual_collection_users():
+        game_name = row.get("riot_id_game_name")
+        tag_line = row.get("riot_id_tag_line")
+        if game_name and tag_line:
+            riot_ids.append(f"{game_name}#{tag_line}")
+    return "\n".join(riot_ids)
+
+
+def _render_multi_search_controls(
+    cache: MatchCache,
+) -> tuple[MultiSearchRequest, bool]:
+    """멀티서치 입력 위젯을 그리고 요청 객체를 만든다."""
+    render_section_title("멀티서치 수집 조건")
+    default_riot_ids = _format_manual_users(cache)
+    if default_riot_ids and "multi_riot_ids_input" not in st.session_state:
+        st.session_state["multi_riot_ids_input"] = default_riot_ids
+
     with st.container(border=True):
-        c_rank, c_days, c_matches = st.columns(3)
-        with c_rank:
-            top_n = st.selectbox(
-                "랭킹 범위",
-                (50, 100, 200, 300),
-                index=(50, 100, 200, 300).index(DEFAULT_CHALLENGER_TOP_N),
-                help="KR 챌린저 랭킹 상위 N명을 조회합니다.",
-                key="challenger_top_n",
-            )
+        riot_ids_raw = st.text_area(
+            "수집할 Riot ID 목록",
+            placeholder="예: Aoo#chi\nHide on bush#KR1",
+            height=180,
+            key="multi_riot_ids_input",
+            help="한 줄에 하나씩 입력하거나 쉼표로 구분할 수 있습니다.",
+        )
+
+        c_days, c_matches = st.columns(2)
         with c_days:
             days = st.selectbox(
-                "검색 기간",
-                (3, 7, 14, 30),
-                index=(3, 7, 14, 30).index(DEFAULT_CHALLENGER_DAYS),
+                "수집 기간",
+                MULTI_PERIOD_OPTIONS,
+                index=MULTI_PERIOD_OPTIONS.index(DEFAULT_MULTI_SEARCH_DAYS),
                 format_func=lambda value: f"최근 {value}일",
-                key="challenger_days",
+                key="multi_days",
             )
         with c_matches:
             matches_per_player = st.selectbox(
                 "1인당 최대 매치",
-                (20, 50, 100),
-                index=(20, 50, 100).index(DEFAULT_MATCHES_PER_PLAYER),
+                MULTI_MATCHES_PER_PLAYER_OPTIONS,
+                index=MULTI_MATCHES_PER_PLAYER_OPTIONS.index(
+                    DEFAULT_MULTI_MATCHES_PER_PLAYER
+                ),
                 help="플레이어별 최근 솔로 랭크 매치 중 최대 N개를 분석합니다.",
-                key="challenger_matches_per_player",
+                key="multi_matches_per_player",
             )
 
         submitted = st.button(
-            "챌린저 수집 실행",
+            "멀티서치 수집 실행",
             type="primary",
             use_container_width=True,
         )
 
-    request = ChallengerSearchRequest(
-        top_n=int(top_n),
+    request = MultiSearchRequest(
+        riot_ids_raw=riot_ids_raw,
         days=int(days),
         matches_per_player=int(matches_per_player),
     )
@@ -440,12 +459,12 @@ def _run_submitted_search(
     st.session_state["last_payload"] = payload
 
 
-def _run_submitted_challenger_search(
+def _run_submitted_multi_search(
     *,
     config: AppConfig,
-    request: ChallengerSearchRequest,
+    request: MultiSearchRequest,
 ) -> None:
-    """챌린저 검색 버튼 클릭 시 검색을 실행하고 세션에 결과를 저장한다."""
+    """멀티서치 수집 버튼 클릭 시 수집을 실행하고 세션에 결과를 저장한다."""
     progress_bar = st.progress(0.0)
     status_box = st.empty()
     cache = get_match_cache(config.db_path, CACHE_VERSION)
@@ -457,7 +476,7 @@ def _run_submitted_challenger_search(
         status_box.info(message)
 
     try:
-        payload = run_challenger_search(
+        payload = run_multi_search(
             config=config,
             request=request,
             cache=cache,
@@ -483,7 +502,7 @@ def _run_submitted_challenger_search(
         status_box.empty()
         progress_bar.empty()
 
-    st.session_state["last_challenger_payload"] = payload
+    st.session_state["last_multi_search_payload"] = payload
 
 
 def _run_submitted_db_search(
@@ -516,9 +535,7 @@ def render_app(config: AppConfig) -> None:
     champion_data, static_data = loaded
     cache = get_match_cache(config.db_path, CACHE_VERSION)
     default_riot_id = cache.get_latest_search_riot_id()
-    riot_tab, challenger_tab, db_tab = st.tabs(
-        ["개별유저검색", "챌린저 수집", "DB조회"]
-    )
+    riot_tab, multi_search_tab, db_tab = st.tabs(["개별유저검색", "멀티서치", "DB조회"])
 
     with riot_tab:
         header_slot = st.empty()
@@ -550,21 +567,18 @@ def render_app(config: AppConfig) -> None:
         if payload is not None:
             render_results(payload, champion_data, cache, static_data, config)
 
-    with challenger_tab:
-        challenger_request, challenger_submitted = _render_challenger_controls()
+    with multi_search_tab:
+        multi_request, multi_submitted = _render_multi_search_controls(cache)
 
-        if challenger_submitted:
-            _run_submitted_challenger_search(
+        if multi_submitted:
+            _run_submitted_multi_search(
                 config=config,
-                request=challenger_request,
+                request=multi_request,
             )
 
-        challenger_payload = st.session_state.get("last_challenger_payload")
-        if challenger_payload is not None:
-            render_challenger_results(
-                challenger_payload,
-                cache,
-            )
+        multi_payload = st.session_state.get("last_multi_search_payload")
+        if multi_payload is not None:
+            render_multi_search_results(multi_payload)
 
     with db_tab:
         db_request, db_submitted = _render_db_search_controls(champion_data)
