@@ -12,9 +12,10 @@ from src.cache import MatchCache
 from src.challenger_service import ChallengerSearchPayload
 from src.champions import ChampionData, champion_icon_url
 from src.config import AppConfig
+from src.db_search_service import IndexedMatchupSearchPayload
 from src.export import (
-    build_challenger_results_csv_bytes,
-    build_challenger_results_filename,
+    build_indexed_results_csv_bytes,
+    build_indexed_results_filename,
     build_results_csv_bytes,
     build_results_filename,
 )
@@ -141,6 +142,12 @@ def render_result_summary(payload: SearchPayload, champion_data: ChampionData) -
     enemy_ko = champion_data.to_korean_name(payload.enemy_champion_key)
     account = payload.account
 
+    index_text = (
+        f"DB 인덱스 {payload.indexed_rows} row 반영"
+        if payload.index_allowed
+        else f"DB 인덱스 제외 · 기준 {payload.index_tier or '랭크 없음'}"
+    )
+
     st.markdown(
         f"""
 <section class="result-summary">
@@ -153,7 +160,7 @@ def render_result_summary(payload: SearchPayload, champion_data: ChampionData) -
     <div class="kpi-card primary"><span>발견</span><strong>{total}</strong><em>경기</em></div>
     <div class="kpi-card"><span>승률</span><strong>{winrate}</strong><em>{wins}승 {losses}패</em></div>
     <div class="kpi-card"><span>스캔</span><strong>{payload.scanned_total}</strong><em>매치</em></div>
-    <div class="kpi-card"><span>캐시 / API</span><strong>{payload.cache_hits} / {payload.api_calls}</strong><em>호출 절약</em></div>
+    <div class="kpi-card"><span>캐시 / API</span><strong>{payload.cache_hits} / {payload.api_calls}</strong><em>{_h(index_text)}</em></div>
   </div>
 </section>
         """,
@@ -163,9 +170,33 @@ def render_result_summary(payload: SearchPayload, champion_data: ChampionData) -
 
 def render_challenger_result_summary(
     payload: ChallengerSearchPayload,
+) -> None:
+    """챌린저 수집 결과 요약과 KPI를 표시한다."""
+    st.markdown(
+        f"""
+<section class="result-summary">
+  <div class="summary-main">
+    <span>챌린저 수집</span>
+    <strong>상위 {payload.top_n}명 · {payload.period_label}</strong>
+    <p>고티어 match_cache 저장 후 matchup_index에 반영했습니다.</p>
+  </div>
+  <div class="kpi-row">
+    <div class="kpi-card primary"><span>인덱스</span><strong>{payload.indexed_rows}</strong><em>row</em></div>
+    <div class="kpi-card"><span>스캔</span><strong>{payload.scanned_players}</strong><em>플레이어</em></div>
+    <div class="kpi-card"><span>매치/API</span><strong>{payload.scanned_matches} / {payload.api_calls}</strong><em>신규 상세 {payload.new_match_details} · 캐시 {payload.cache_hits}</em></div>
+    <div class="kpi-card"><span>랭킹 변화</span><strong>+{payload.new_challengers} / -{payload.deactivated_challengers}</strong><em>복귀 {payload.reactivated_challengers}</em></div>
+  </div>
+</section>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_indexed_matchup_result_summary(
+    payload: IndexedMatchupSearchPayload,
     champion_data: ChampionData,
 ) -> None:
-    """챌린저 검색 결과 요약과 KPI를 표시한다."""
+    """DB조회 결과 요약과 KPI를 표시한다."""
     results = payload.results
     wins = sum(1 for row in results if row["win"])
     total = len(results)
@@ -183,15 +214,15 @@ def render_challenger_result_summary(
         f"""
 <section class="result-summary">
   <div class="summary-main">
-    <span>챌린저 매치업</span>
-    <strong>상위 {payload.top_n}명 · {my_ko} vs {enemy_ko}</strong>
-    <p>{_h(payload.lane_label)} · {_h(payload.period_label)} · 패치 {_h(patch_text)}</p>
+    <span>DB조회</span>
+    <strong>{_h(my_ko)} vs {_h(enemy_ko)}</strong>
+    <p>{_h(payload.lane_label)} · {_h(payload.period_kind)} · 패치 {_h(patch_text)}</p>
   </div>
   <div class="kpi-row">
     <div class="kpi-card primary"><span>발견</span><strong>{total}</strong><em>경기</em></div>
     <div class="kpi-card"><span>승률</span><strong>{winrate}</strong><em>{wins}승 {losses}패</em></div>
-    <div class="kpi-card"><span>스캔</span><strong>{payload.scanned_players}</strong><em>플레이어</em></div>
-    <div class="kpi-card"><span>매치/API</span><strong>{payload.scanned_matches} / {payload.api_calls}</strong><em>캐시 {payload.cache_hits}</em></div>
+    <div class="kpi-card"><span>최대</span><strong>{payload.max_results}</strong><em>결과</em></div>
+    <div class="kpi-card"><span>API</span><strong>0</strong><em>DB-only</em></div>
   </div>
 </section>
         """,
@@ -252,7 +283,7 @@ def render_result_card(
     enemy_opgg_url = build_opgg_url(enemy_name, enemy_tag) if enemy_tag else ""
     player_name, player_tag = _split_player_riot_id(row)
     player_riot_id = f"{player_name}#{player_tag}" if player_tag else player_name
-    is_challenger_row = bool(row.get("player_puuid"))
+    is_indexed_row = bool(row.get("player_puuid"))
     side_icons_html = _result_side_icons_html(row, static_data)
     loadout_html = _result_loadout_html(row, static_data)
     champion_level = int(row.get("my_champion_level") or 0)
@@ -276,15 +307,20 @@ def render_result_card(
         )
 
     with summary_col:
-        if is_challenger_row:
+        if is_indexed_row:
             rank_text = row.get("player_rank")
             lp_text = row.get("player_league_points")
+            rank_meta = (
+                f"{rank_text}위 · {lp_text} LP"
+                if rank_text is not None and lp_text is not None
+                else "DB 인덱스"
+            )
             st.markdown(
                 f"""
 <div class="player-target">
-  <span>챌린저 플레이어</span>
+  <span>플레이어</span>
   <strong>{_h(player_name)}</strong>
-  <em>#{_h(player_tag)} · {rank_text}위 · {lp_text} LP</em>
+  <em>#{_h(player_tag)} · {_h(rank_meta)}</em>
 </div>
                 """,
                 unsafe_allow_html=True,
@@ -324,7 +360,7 @@ def render_result_card(
         )
 
     with action_col:
-        if is_challenger_row:
+        if is_indexed_row:
             player_copy_col, enemy_copy_col, opgg_col, detail_col = st.columns(
                 4,
                 gap="small",
@@ -662,21 +698,30 @@ def render_results(
 
 def render_challenger_results(
     payload: ChallengerSearchPayload,
+    cache: MatchCache,
+) -> None:
+    """챌린저 수집 결과 요약을 표시한다."""
+    _ = cache
+    render_challenger_result_summary(payload)
+
+
+def render_indexed_matchup_results(
+    payload: IndexedMatchupSearchPayload,
     champion_data: ChampionData,
     cache: MatchCache,
     static_data: StaticData,
     config: AppConfig,
 ) -> None:
-    """챌린저 검색 결과 요약, 목록, 상세 패널, CSV 다운로드를 표시한다."""
-    render_challenger_result_summary(payload, champion_data)
+    """DB조회 결과 요약, 목록, 상세 패널, CSV 다운로드를 표시한다."""
+    render_indexed_matchup_result_summary(payload, champion_data)
 
     if not payload.results:
         render_empty_state()
         return
 
-    render_section_title("챌린저 결과 목록")
+    render_section_title("DB조회 결과 목록")
     detail_ids = [
-        f"challenger-{row.get('match_id') or idx}-{row.get('player_puuid') or idx}"
+        f"indexed-{row.get('match_id') or idx}-{row.get('player_puuid') or idx}"
         for idx, row in enumerate(payload.results)
     ]
     valid_detail_ids = set(detail_ids)
@@ -692,7 +737,7 @@ def render_challenger_results(
 
         with st.container(
             border=False,
-            key=f"challenger_match_result_card_{'win' if row['win'] else 'loss'}_{idx}",
+            key=f"indexed_match_result_card_{'win' if row['win'] else 'loss'}_{idx}",
         ):
             render_result_card(
                 row,
@@ -701,7 +746,7 @@ def render_challenger_results(
                 detail_id=detail_id,
                 row_index=idx,
                 detail_open=detail_open,
-                key_prefix="challenger_match_detail",
+                key_prefix="indexed_match_detail",
             )
             if detail_open:
                 _render_challenger_linked_match_detail(
@@ -714,8 +759,8 @@ def render_challenger_results(
 
     st.download_button(
         label="CSV 다운로드",
-        data=build_challenger_results_csv_bytes(payload),
-        file_name=build_challenger_results_filename(payload),
+        data=build_indexed_results_csv_bytes(payload),
+        file_name=build_indexed_results_filename(payload),
         mime="text/csv",
         use_container_width=True,
     )

@@ -36,6 +36,20 @@ PERIOD_PRESETS: dict[str, int] = {
 PERIOD_CUSTOM_LABEL = "직접 지정"
 PERIOD_OPTIONS: tuple[str, ...] = tuple(PERIOD_PRESETS.keys()) + (PERIOD_CUSTOM_LABEL,)
 DEFAULT_PERIOD_LABEL = "최근 30일"
+INDEX_MIN_TIER = "DIAMOND"
+SOLO_RANK_QUEUE_TYPE = "RANKED_SOLO_5x5"
+TIER_ORDER: dict[str, int] = {
+    "IRON": 0,
+    "BRONZE": 1,
+    "SILVER": 2,
+    "GOLD": 3,
+    "PLATINUM": 4,
+    "EMERALD": 5,
+    "DIAMOND": 6,
+    "MASTER": 7,
+    "GRANDMASTER": 8,
+    "CHALLENGER": 9,
+}
 
 ProgressCallback = Callable[[float], None]
 StatusCallback = Callable[[str], None]
@@ -70,6 +84,9 @@ class SearchPayload:
     period_kind: str
     start_ts: int
     end_ts: int
+    index_allowed: bool
+    index_tier: str | None
+    indexed_rows: int
 
 
 def resolve_puuid(
@@ -182,6 +199,59 @@ def fetch_match_timeline(
     return timeline
 
 
+def _is_index_allowed(profile: dict[str, Any] | None) -> bool:
+    tier = str((profile or {}).get("tier") or "").upper()
+    min_tier_value = TIER_ORDER[INDEX_MIN_TIER]
+    return TIER_ORDER.get(tier, -1) >= min_tier_value
+
+
+def _fetch_ranked_profile(
+    client: RiotClient,
+    cache: MatchCache,
+    puuid: str,
+    queue_id: int,
+) -> tuple[dict[str, Any] | None, int, int]:
+    """솔로 랭크 프로필을 가져오고 (profile, cache_hits, api_calls)를 반환한다."""
+    cached = cache.get_ranked_profile(puuid, queue_id)
+    if cached is not None and cached.get("tier"):
+        return cached, 1, 0
+
+    try:
+        entries = client.get_league_entries_by_puuid(puuid)
+    except RiotApiNotFound:
+        entries = []
+    api_calls = 1
+
+    if not entries:
+        try:
+            summoner = client.get_summoner_by_puuid(puuid)
+            summoner_id = summoner.get("id")
+            entries = (
+                client.get_league_entries_by_summoner_id(summoner_id)
+                if summoner_id
+                else []
+            )
+            api_calls += 2 if summoner_id else 1
+        except RiotApiNotFound:
+            entries = []
+            api_calls += 1
+
+    profile_entry = next(
+        (entry for entry in entries if entry.get("queueType") == SOLO_RANK_QUEUE_TYPE),
+        None,
+    )
+    cache.save_ranked_profile(
+        puuid=puuid,
+        queue_id=queue_id,
+        tier=profile_entry.get("tier") if profile_entry else None,
+        rank=profile_entry.get("rank") if profile_entry else None,
+        league_points=profile_entry.get("leaguePoints") if profile_entry else None,
+        wins=profile_entry.get("wins") if profile_entry else None,
+        losses=profile_entry.get("losses") if profile_entry else None,
+    )
+    return cache.get_ranked_profile(puuid, queue_id), 0, api_calls
+
+
 def run_search(
     *,
     config: AppConfig,
@@ -223,6 +293,15 @@ def run_search(
         account = resolve_puuid(client, cache, game_name, tag_line)
         puuid = account["puuid"]
 
+        status_cb("솔로 랭크 티어를 확인하는 중...")
+        ranked_profile, rank_cache_hits, rank_api_calls = _fetch_ranked_profile(
+            client,
+            cache,
+            puuid,
+            config.queue_id,
+        )
+        index_allowed = _is_index_allowed(ranked_profile)
+
         status_cb("매치 ID 목록을 불러오는 중...")
         match_ids = fetch_all_match_ids(
             client=client,
@@ -235,8 +314,9 @@ def run_search(
 
         total = len(match_ids)
         results: list[dict[str, Any]] = []
-        cache_hits = 0
-        api_calls = 0
+        cache_hits = rank_cache_hits
+        api_calls = rank_api_calls
+        indexed_rows = 0
 
         if total == 0:
             status_cb("이 기간에는 매치가 없습니다.")
@@ -244,6 +324,11 @@ def run_search(
         else:
             for idx, match_id in enumerate(match_ids, start=1):
                 status_cb(f"매치 분석 중... ({idx}/{total})")
+                cache.record_match_discovery(
+                    match_id=match_id,
+                    source_puuid=puuid,
+                    source="manual_user",
+                )
 
                 # 캐시 히트 카운트는 fetch 직전에 확인한다.
                 cached_before = cache.get_match(match_id) is not None
@@ -258,6 +343,12 @@ def run_search(
                     api_calls += 1
                     # 같은 1초에 너무 많이 부르지 않도록 가벼운 페이싱.
                     time.sleep(0.05)
+
+                if index_allowed:
+                    indexed_rows += cache.index_match(
+                        match,
+                        allowed_queue_id=config.queue_id,
+                    )
 
                 row = extract_matchup_result(
                     match=match,
@@ -297,4 +388,7 @@ def run_search(
         period_kind=request.period_kind,
         start_ts=start_ts,
         end_ts=end_ts,
+        index_allowed=index_allowed,
+        index_tier=(ranked_profile or {}).get("tier"),
+        indexed_rows=indexed_rows,
     )

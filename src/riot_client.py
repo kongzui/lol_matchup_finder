@@ -135,6 +135,43 @@ class RiotClient:
             not_found_message="소환사 정보를 찾을 수 없습니다.",
         )
 
+    def get_summoner_by_puuid(self, puuid: str) -> dict[str, Any]:
+        """PUUID로 소환사 정보를 가져온다."""
+        url = (
+            f"https://{self._platform}.api.riotgames.com"
+            f"/lol/summoner/v4/summoners/by-puuid/{quote(puuid, safe='')}"
+        )
+        return self._get_json(
+            url,
+            not_found_message="PUUID에 해당하는 소환사 정보를 찾을 수 없습니다.",
+        )
+
+    def get_league_entries_by_summoner_id(
+        self,
+        encrypted_summoner_id: str,
+    ) -> list[dict[str, Any]]:
+        """encryptedSummonerId로 랭크 엔트리 목록을 가져온다."""
+        url = (
+            f"https://{self._platform}.api.riotgames.com"
+            f"/lol/league/v4/entries/by-summoner/"
+            f"{quote(encrypted_summoner_id, safe='')}"
+        )
+        result = self._get_json(url)
+        if not isinstance(result, list):
+            raise RiotApiError("랭크 엔트리 응답이 비정상입니다.")
+        return result
+
+    def get_league_entries_by_puuid(self, puuid: str) -> list[dict[str, Any]]:
+        """PUUID로 랭크 엔트리 목록을 가져온다."""
+        url = (
+            f"https://{self._platform}.api.riotgames.com"
+            f"/lol/league/v4/entries/by-puuid/{quote(puuid, safe='')}"
+        )
+        result = self._get_json(url)
+        if not isinstance(result, list):
+            raise RiotApiError("랭크 엔트리 응답이 비정상입니다.")
+        return result
+
     def get_match_ids(
         self,
         puuid: str,
