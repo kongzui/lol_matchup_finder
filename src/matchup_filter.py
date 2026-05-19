@@ -63,18 +63,8 @@ def _participant_detail(p: dict[str, Any]) -> dict[str, Any]:
 
 
 def _participant_summary(p: dict[str, Any]) -> dict[str, Any]:
-    """나머지 8명용 요약 (챔피언 + KDA + 닉네임)."""
-    return {
-        "team_id": p.get("teamId"),
-        "team_position": p.get("teamPosition"),
-        "champion_key": p.get("championName"),
-        "riot_id_game_name": p.get("riotIdGameName"),
-        "riot_id_tag_line": p.get("riotIdTagline"),
-        "summoner_name": p.get("summonerName"),
-        "kills": int(p.get("kills") or 0),
-        "deaths": int(p.get("deaths") or 0),
-        "assists": int(p.get("assists") or 0),
-    }
+    """나머지 팀원도 종합 표에서 쓸 수 있도록 상세 필드를 반환한다."""
+    return _participant_detail(p)
 
 
 def extract_focus_view(

@@ -276,6 +276,8 @@ def run_search(
             "선택한 챔피언을 인식하지 못했습니다. 목록을 새로고침해주세요."
         )
 
+    if request.lane_label not in LANE_LABEL_TO_TEAM_POSITION:
+        raise RiotApiError("선택한 라인을 인식하지 못했습니다.")
     lane_value = LANE_LABEL_TO_TEAM_POSITION[request.lane_label]
 
     if request.period_kind in PERIOD_PRESETS:

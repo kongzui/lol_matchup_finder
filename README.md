@@ -43,10 +43,11 @@ CACHE_DB_PATH=data/matchup_finder.db
 ## 3. 실행
 
 ```powershell
-streamlit run app.py
+run.bat
 ```
 
-브라우저가 자동으로 열리지 않으면 터미널에 표시되는 `http://localhost:8501` 로 접속하세요.
+백엔드는 `http://127.0.0.1:8000`, React 프론트는 `http://127.0.0.1:5173` 에서 실행됩니다.
+브라우저가 자동으로 열리지 않으면 `http://127.0.0.1:5173` 로 접속하세요.
 
 ## 4. 연결 점검 스크립트
 
@@ -67,10 +68,11 @@ python scripts/check_riot_api.py "Hide on bush#KR1"
 
 ```text
 lol_matchup_finder/
-  app.py                # Streamlit UI 진입점
+  frontend/             # React/Vite 프론트엔드
   requirements.txt
   .env.example
   src/
+    api/                # FastAPI 로컬 API
     riot_client.py      # Riot API 호출 (Account-V1 / Match-V5)
     matchup_filter.py   # 매치업 조건 필터
     cache.py            # SQLite 캐시 (account/match/search)

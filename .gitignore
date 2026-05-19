@@ -6,6 +6,8 @@ __pycache__/
 venv/
 data/*.db
 data/*.db-journal
-.streamlit/secrets.toml
 .vscode/
 .idea/
+frontend/node_modules/
+frontend/dist/
+frontend/*.tsbuildinfo

@@ -1,0 +1,21 @@
+{
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc --noEmit -p tsconfig.json && vite build",
+    "check:web": "tsc --noEmit -p tsconfig.json && vite build",
+    "format:web": "prettier --write \"index.html\" \"src/**/*.{ts,tsx,css}\""
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "lucide-react": "^0.468.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "vite": "^6.0.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "prettier": "^3.4.2",
+    "typescript": "^5.7.2"
+  }
+}

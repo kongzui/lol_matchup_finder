@@ -75,6 +75,8 @@ def run_indexed_matchup_search(
         if not enemy_champion_key:
             raise RiotApiError("선택한 상대 챔피언을 인식하지 못했습니다.")
 
+    if request.lane_label not in LANE_LABEL_TO_TEAM_POSITION:
+        raise RiotApiError("선택한 라인을 인식하지 못했습니다.")
     lane_value = LANE_LABEL_TO_TEAM_POSITION[request.lane_label]
     if request.period_kind in PERIOD_PRESETS:
         days = PERIOD_PRESETS[request.period_kind]
