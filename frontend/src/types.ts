@@ -145,11 +145,23 @@ export interface JobPayload {
 }
 
 export interface DetailPlayer {
+  puuid?: string;
+  team_id?: number;
+  team_position?: string;
+  champion_key?: string;
   championNameKo: string;
   championIconUrl: string;
   riot_id_game_name?: string;
   riot_id_tag_line?: string;
   summoner_name?: string;
+  rankLabel?: string;
+  rankedProfile?: {
+    tier?: string | null;
+    rank?: string | null;
+    league_points?: number | null;
+    wins?: number | null;
+    losses?: number | null;
+  } | null;
   win: boolean;
   kills: number;
   deaths: number;
@@ -157,27 +169,43 @@ export interface DetailPlayer {
   cs: number;
   gold: number;
   damage: number;
+  vision: number;
   champion_level: number;
   summoner1IconUrl?: string | null;
   summoner2IconUrl?: string | null;
+  summoner1Name?: string;
+  summoner2Name?: string;
   itemIconUrls: Array<string | null>;
   primaryRuneIconUrls: Array<string | null>;
   secondaryRuneIconUrls: Array<string | null>;
+  primaryRuneNames?: string[];
+  secondaryRuneNames?: string[];
   primaryTreeIconUrl?: string | null;
   secondaryTreeIconUrl?: string | null;
+  primaryTreeName?: string;
+  secondaryTreeName?: string;
   statShardIconUrls: Array<string | null>;
+  statShardNames?: string[];
+  primaryRunePage?: RunePage | null;
+  secondaryRunePage?: RunePage | null;
+  statShardPage?: RuneEntry[][];
 }
 
-export interface TeamSummary {
-  championNameKo: string;
-  championIconUrl: string;
-  riot_id_game_name?: string;
-  riot_id_tag_line?: string;
-  summoner_name?: string;
-  kills: number;
-  deaths: number;
-  assists: number;
+export interface RuneEntry {
+  id: number;
+  name: string;
+  iconUrl?: string | null;
+  selected: boolean;
 }
+
+export interface RunePage {
+  treeId: number;
+  treeName: string;
+  treeIconUrl?: string | null;
+  slots: RuneEntry[][];
+}
+
+export interface TeamSummary extends DetailPlayer {}
 
 export interface MatchDetail {
   queueId: number;
@@ -194,7 +222,15 @@ export interface MatchDetail {
       timestamp: number;
       icon_url?: string | null;
     }>;
-    skill_events: Array<{ label: string; level: number; timestamp: number }>;
+    skill_events: Array<{
+      label: string;
+      level: number;
+      timestamp: number;
+      skill_slot?: number;
+      skillSlot?: number;
+      iconUrl?: string | null;
+      spellName?: string;
+    }>;
   } | null;
   timelineError: string | null;
 }

@@ -44,6 +44,7 @@ from src.search_service import (
     PERIOD_OPTIONS,
     SearchPayload,
     SearchRequest,
+    fetch_ranked_profile,
     fetch_match_timeline,
     run_search,
 )
@@ -270,7 +271,9 @@ def _result_stats(results: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _rune_entry(static_data: StaticData, rune_id: int, selected: set[int]) -> dict[str, Any]:
+def _rune_entry(
+    static_data: StaticData, rune_id: int, selected: set[int]
+) -> dict[str, Any]:
     return {
         "id": rune_id,
         "name": static_data.rune_name(rune_id),
@@ -412,6 +415,74 @@ def _participant_with_assets(player: dict[str, Any] | None) -> dict[str, Any] | 
 
 def _summary_with_assets(player: dict[str, Any]) -> dict[str, Any]:
     return _participant_with_assets(player) or dict(player)
+
+
+_TIER_LABELS = {
+    "IRON": "아이언",
+    "BRONZE": "브론즈",
+    "SILVER": "실버",
+    "GOLD": "골드",
+    "PLATINUM": "플래티넘",
+    "EMERALD": "에메랄드",
+    "DIAMOND": "다이아몬드",
+    "MASTER": "마스터",
+    "GRANDMASTER": "그랜드마스터",
+    "CHALLENGER": "챌린저",
+}
+
+
+def _rank_label(profile: dict[str, Any] | None) -> str:
+    if not profile or not profile.get("tier"):
+        return "랭크 없음"
+    tier_key = str(profile.get("tier") or "").upper()
+    tier = _TIER_LABELS.get(tier_key, tier_key.title())
+    rank = profile.get("rank") or ""
+    lp = profile.get("league_points")
+    lp_text = f" {lp}LP" if lp is not None else ""
+    return f"{tier} {rank}{lp_text}".strip()
+
+
+def _attach_rank_profiles(
+    players: list[dict[str, Any]],
+    *,
+    cache: MatchCache,
+    config: AppConfig,
+) -> None:
+    puuids = [player.get("puuid") for player in players if player.get("puuid")]
+    if not puuids:
+        return
+
+    missing_puuids: list[str] = []
+    for player in players:
+        puuid = player.get("puuid")
+        profile = cache.get_ranked_profile(puuid, config.queue_id) if puuid else None
+        if profile is None and puuid:
+            missing_puuids.append(puuid)
+        player["rankedProfile"] = profile
+        player["rankLabel"] = _rank_label(profile)
+
+    if missing_puuids and config.api_key:
+        try:
+            with RiotClient(
+                api_key=config.api_key,
+                region=config.region,
+                platform=config.platform,
+            ) as client:
+                for puuid in dict.fromkeys(missing_puuids):
+                    try:
+                        fetch_ranked_profile(client, cache, puuid, config.queue_id)
+                    except RiotApiError:
+                        continue
+        except RiotApiError:
+            return
+
+        for player in players:
+            puuid = player.get("puuid")
+            profile = (
+                cache.get_ranked_profile(puuid, config.queue_id) if puuid else None
+            )
+            player["rankedProfile"] = profile
+            player["rankLabel"] = _rank_label(profile)
 
 
 @app.get("/api/meta/options")
@@ -622,18 +693,29 @@ def get_match_detail(
             for event in build_timeline.get("skill_events", [])
         ]
 
+    me = _participant_with_assets(focus.get("me"))
+    enemy_laner = _participant_with_assets(focus.get("enemy_laner"))
+    others_ally = [
+        _summary_with_assets(player) for player in focus.get("others_ally") or []
+    ]
+    others_enemy = [
+        _summary_with_assets(player) for player in focus.get("others_enemy") or []
+    ]
+    players_for_rank = [
+        player
+        for player in [me, enemy_laner, *others_ally, *others_enemy]
+        if player is not None
+    ]
+    _attach_rank_profiles(players_for_rank, cache=cache, config=config)
+
     return {
         "queueId": focus.get("queue_id"),
         "gameDuration": focus.get("game_duration"),
         "gameVersion": focus.get("game_version"),
-        "me": _participant_with_assets(focus.get("me")),
-        "enemyLaner": _participant_with_assets(focus.get("enemy_laner")),
-        "othersAlly": [
-            _summary_with_assets(player) for player in focus.get("others_ally") or []
-        ],
-        "othersEnemy": [
-            _summary_with_assets(player) for player in focus.get("others_enemy") or []
-        ],
+        "me": me,
+        "enemyLaner": enemy_laner,
+        "othersAlly": others_ally,
+        "othersEnemy": others_enemy,
         "buildTimeline": build_timeline,
         "timelineError": timeline_error,
     }

@@ -24,14 +24,24 @@ import type {
   MetaOptions,
   MultiSearchBody,
   MultiSearchPayload,
+  RuneEntry,
+  RunePage,
   SearchBody,
   SearchPayload,
   TeamSummary,
 } from "./types";
 
 type Workspace = "search" | "multi" | "db";
+type DetailTab = "summary" | "build";
 
 const PAGE_SIZE = 50;
+const LANE_ORDER: Record<string, number> = {
+  TOP: 0,
+  JUNGLE: 1,
+  MIDDLE: 2,
+  BOTTOM: 3,
+  UTILITY: 4,
+};
 
 function todayText(): string {
   return new Date().toISOString().slice(0, 10);
@@ -1032,9 +1042,13 @@ function MatchDetailPanel({
 }) {
   const [detail, setDetail] = useState<MatchDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<DetailTab>("summary");
 
   useEffect(() => {
     let cancelled = false;
+    setDetail(null);
+    setError(null);
+    setActiveTab("summary");
     api
       .getMatchDetail(matchId, playerPuuid)
       .then((value) => {
@@ -1060,135 +1074,453 @@ function MatchDetailPanel({
   }
   return (
     <div className="detail-panel">
-      <div className="detail-grid">
-        <DetailPlayerBlock label="기준 플레이어" player={detail.me} />
-        {detail.enemyLaner && (
-          <DetailPlayerBlock label="맞라이너" player={detail.enemyLaner} />
-        )}
+      <div className="detail-tabs" role="tablist" aria-label="매치 상세 탭">
+        <button
+          className={activeTab === "summary" ? "active" : ""}
+          onClick={() => setActiveTab("summary")}
+          type="button"
+        >
+          종합
+        </button>
+        <button
+          className={activeTab === "build" ? "active" : ""}
+          onClick={() => setActiveTab("build")}
+          type="button"
+        >
+          빌드
+        </button>
       </div>
-      <BuildTimeline detail={detail} />
-      <TeamSummary title="아군" players={detail.othersAlly} />
-      <TeamSummary title="적군" players={detail.othersEnemy} />
-      {detail.timelineError && <p className="muted">{detail.timelineError}</p>}
+      {activeTab === "summary" ? (
+        <MatchSummaryTab detail={detail} />
+      ) : (
+        <BuildTab detail={detail} />
+      )}
     </div>
   );
 }
 
-function DetailPlayerBlock({
-  label,
-  player,
-}: {
-  label: string;
-  player: DetailPlayer;
-}) {
+function MatchSummaryTab({ detail }: { detail: MatchDetail }) {
+  const allyPlayers = sortTeam([detail.me, ...(detail.othersAlly || [])]);
+  const enemyPlayers = sortTeam(
+    [detail.enemyLaner, ...(detail.othersEnemy || [])].filter(
+      Boolean,
+    ) as DetailPlayer[],
+  );
+  const allPlayers = [...allyPlayers, ...enemyPlayers];
+  const maxDamage = Math.max(
+    ...allPlayers.map((player) => player.damage || 0),
+    1,
+  );
+  const allyTotals = teamTotals(allyPlayers);
+  const enemyTotals = teamTotals(enemyPlayers);
+
   return (
-    <div className={`detail-player ${player.win ? "win" : "loss"}`}>
-      <div className="detail-player-head">
-        <span>{label}</span>
-        <strong>{player.win ? "승리" : "패배"}</strong>
+    <div className="match-summary-tab">
+      <div className="team-tables">
+        <TeamTable
+          title={detail.me.win ? "승리 (블루팀)" : "패배 (블루팀)"}
+          players={allyPlayers}
+          maxDamage={maxDamage}
+        />
+        <TeamCompare ally={allyTotals} enemy={enemyTotals} />
+        <TeamTable
+          title={detail.enemyLaner?.win ? "승리 (레드팀)" : "패배 (레드팀)"}
+          players={enemyPlayers}
+          maxDamage={maxDamage}
+        />
       </div>
-      <div className="detail-main">
-        <img className="detail-champion" src={player.championIconUrl} alt="" />
-        <div className="detail-spells">
-          {player.summoner1IconUrl && (
-            <img src={player.summoner1IconUrl} alt="" />
-          )}
-          {player.summoner2IconUrl && (
-            <img src={player.summoner2IconUrl} alt="" />
-          )}
-        </div>
-        <div className="detail-text">
-          <strong>
-            {player.riot_id_game_name || player.summoner_name || "-"}
-            {player.riot_id_tag_line ? `#${player.riot_id_tag_line}` : ""}
-          </strong>
-          <p>
-            {player.championNameKo} · {player.kills}/{player.deaths}/
-            {player.assists} · CS {player.cs}
-          </p>
-          <p>
-            {Number(player.gold || 0).toLocaleString()} gold ·{" "}
-            {Number(player.damage || 0).toLocaleString()} damage
-          </p>
-        </div>
+    </div>
+  );
+}
+
+function sortTeam(players: DetailPlayer[]): DetailPlayer[] {
+  return players
+    .map((player, index) => ({ player, index }))
+    .sort((left, right) => {
+      const leftOrder = LANE_ORDER[left.player.team_position || ""] ?? 99;
+      const rightOrder = LANE_ORDER[right.player.team_position || ""] ?? 99;
+      return leftOrder - rightOrder || left.index - right.index;
+    })
+    .map(({ player }) => player);
+}
+
+function teamTotals(players: DetailPlayer[]) {
+  return {
+    kills: players.reduce((total, player) => total + (player.kills || 0), 0),
+    gold: players.reduce((total, player) => total + (player.gold || 0), 0),
+  };
+}
+
+function participantName(player: DetailPlayer): string {
+  const name = player.riot_id_game_name || player.summoner_name || "-";
+  return player.riot_id_tag_line ? `${name}#${player.riot_id_tag_line}` : name;
+}
+
+function kdaRatio(player: DetailPlayer): string {
+  if (!player.deaths) {
+    return "Perfect";
+  }
+  return ((player.kills + player.assists) / player.deaths).toFixed(2);
+}
+
+function TeamTable({
+  title,
+  players,
+  maxDamage,
+}: {
+  title: string;
+  players: DetailPlayer[];
+  maxDamage: number;
+}) {
+  const resultClass = players[0]?.win ? "win" : "loss";
+  return (
+    <section className={`team-table ${resultClass}`}>
+      <div className="team-table-title">{title}</div>
+      <div className="team-table-head">
+        <span>챔피언</span>
+        <span>플레이어</span>
+        <span>KDA</span>
+        <span>피해량</span>
+        <span>CS</span>
+        <span>골드</span>
+        <span>아이템</span>
       </div>
-      <div className="items detail-items">
-        {player.itemIconUrls.map((url, index) =>
+      {players.map((player) => (
+        <div
+          className="team-table-row"
+          key={player.puuid || participantName(player)}
+        >
+          <div className="team-champion">
+            <div className="level-champion">
+              {player.championIconUrl && (
+                <img src={player.championIconUrl} alt="" />
+              )}
+              <span>{player.champion_level || 0}</span>
+            </div>
+            <div className="summoner-spells">
+              {player.summoner1IconUrl && (
+                <img src={player.summoner1IconUrl} alt="" />
+              )}
+              {player.summoner2IconUrl && (
+                <img src={player.summoner2IconUrl} alt="" />
+              )}
+            </div>
+          </div>
+          <div className="team-player-name">
+            <strong>{participantName(player)}</strong>
+            <span>{player.rankLabel || player.championNameKo}</span>
+          </div>
+          <div className="team-kda">
+            <strong>
+              {player.kills}/{player.deaths}/{player.assists}
+            </strong>
+            <span>{kdaRatio(player)}:1</span>
+          </div>
+          <div className="team-damage">
+            <span>{Number(player.damage || 0).toLocaleString()}</span>
+            <div className="damage-bar">
+              <div
+                style={{
+                  width: `${((player.damage || 0) / maxDamage) * 100}%`,
+                }}
+              />
+            </div>
+          </div>
+          <div className="team-small-stat">{player.cs || 0}</div>
+          <div className="team-small-stat">
+            {Number(player.gold || 0).toLocaleString()}
+          </div>
+          <ItemStrip urls={player.itemIconUrls || []} />
+        </div>
+      ))}
+    </section>
+  );
+}
+
+function ItemStrip({ urls = [] }: { urls?: Array<string | null> }) {
+  return (
+    <div className="item-strip">
+      {[...urls, null, null, null, null, null, null, null]
+        .slice(0, 7)
+        .map((url, index) =>
           url ? (
             <img key={`${url}-${index}`} src={url} alt="" />
           ) : (
-            <span key={index} />
+            <span key={`empty-${index}`} />
           ),
         )}
-      </div>
-      <div className="rune-row">
-        {[
-          player.primaryTreeIconUrl,
-          ...player.primaryRuneIconUrls,
-          player.secondaryTreeIconUrl,
-          ...player.secondaryRuneIconUrls,
-          ...player.statShardIconUrls,
-        ]
-          .filter(Boolean)
-          .map((url, index) => (
-            <img key={`${url}-${index}`} src={url || ""} alt="" />
-          ))}
-      </div>
     </div>
   );
 }
 
-function BuildTimeline({ detail }: { detail: MatchDetail }) {
-  if (!detail.buildTimeline) {
-    return null;
-  }
-  return (
-    <div className="build-panel">
-      <h3>빌드 타임라인</h3>
-      <div className="build-row">
-        {detail.buildTimeline.item_events.slice(0, 18).map((event, index) => (
-          <span key={`${event.item_id}-${event.timestamp}-${index}`}>
-            {event.icon_url ? (
-              <img src={event.icon_url} alt="" />
-            ) : (
-              event.item_id
-            )}
-            <em>{event.minute}분</em>
-          </span>
-        ))}
-      </div>
-      <div className="skill-row">
-        {detail.buildTimeline.skill_events.slice(0, 18).map((event) => (
-          <span key={`${event.level}-${event.timestamp}`}>{event.label}</span>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function TeamSummary({
-  title,
-  players,
+function TeamCompare({
+  ally,
+  enemy,
 }: {
-  title: string;
-  players: TeamSummary[];
+  ally: { kills: number; gold: number };
+  enemy: { kills: number; gold: number };
 }) {
   return (
-    <div className="team-block">
-      <h3>{title}</h3>
-      <div className="team-list">
-        {players.map((player, index) => (
-          <div className="team-row" key={`${title}-${index}`}>
-            <img src={player.championIconUrl} alt="" />
-            <span>
-              {player.riot_id_game_name || player.summoner_name || "-"}
-            </span>
-            <em>
-              {player.kills}/{player.deaths}/{player.assists}
-            </em>
-          </div>
-        ))}
-      </div>
+    <div className="team-compare">
+      <CompareBar label="Total Kill" left={ally.kills} right={enemy.kills} />
+      <CompareBar label="Total Gold" left={ally.gold} right={enemy.gold} />
     </div>
+  );
+}
+
+function CompareBar({
+  label,
+  left,
+  right,
+}: {
+  label: string;
+  left: number;
+  right: number;
+}) {
+  const total = Math.max(left + right, 1);
+  return (
+    <div className="compare-row">
+      <span>{Number(left).toLocaleString()}</span>
+      <div className="compare-track">
+        <div
+          className="compare-left"
+          style={{ width: `${(left / total) * 100}%` }}
+        />
+        <strong>{label}</strong>
+        <div
+          className="compare-right"
+          style={{ width: `${(right / total) * 100}%` }}
+        />
+      </div>
+      <span>{Number(right).toLocaleString()}</span>
+    </div>
+  );
+}
+
+function BuildTab({ detail }: { detail: MatchDetail }) {
+  const buildTimeline = detail.buildTimeline;
+  const me = detail.me;
+  const itemGroups = groupItemEvents(buildTimeline?.item_events || []);
+  return (
+    <div className="build-tab">
+      <section className="build-section">
+        <h3>아이템 빌드</h3>
+        {itemGroups.length ? (
+          <div className="build-sequence item-build-sequence">
+            {itemGroups.map((group, index) => (
+              <div
+                className="item-build-group"
+                key={`${group.minute}-${index}`}
+              >
+                {index > 0 && <span className="build-arrow">›</span>}
+                <div className="item-build-stack">
+                  <div className="item-build-icons">
+                    {group.events.map((event, eventIndex) => (
+                      <span
+                        key={`${event.item_id}-${event.timestamp}-${eventIndex}`}
+                      >
+                        {event.icon_url ? (
+                          <img src={event.icon_url} alt="" />
+                        ) : (
+                          event.item_id
+                        )}
+                      </span>
+                    ))}
+                  </div>
+                  <em>{group.minute}분</em>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <TimelineNotice error={detail.timelineError} />
+        )}
+      </section>
+
+      <section className="build-section">
+        <h3>스킬 빌드</h3>
+        {buildTimeline?.skill_events.length ? (
+          <>
+            <div className="skill-icons">
+              {uniqueSkillEvents(detail).map((event) => (
+                <div
+                  className="skill-icon-card"
+                  key={event.skillSlot || event.skill_slot || event.label}
+                >
+                  {event.iconUrl && (
+                    <img src={event.iconUrl} alt={event.spellName} />
+                  )}
+                  <strong>{event.label}</strong>
+                </div>
+              ))}
+            </div>
+            <div className="skill-order">
+              {buildTimeline.skill_events.map((event) => (
+                <span
+                  className={event.label === "R" ? "ultimate" : ""}
+                  key={`${event.level}-${event.timestamp}`}
+                >
+                  {event.label}
+                </span>
+              ))}
+            </div>
+          </>
+        ) : (
+          <TimelineNotice error={detail.timelineError} />
+        )}
+      </section>
+
+      <section className="build-section">
+        <h3>룬</h3>
+        <div className="rune-pages">
+          <RunePageBlock
+            page={me.primaryRunePage}
+            fallbackIconUrls={me.primaryRuneIconUrls || []}
+            fallbackTitle={me.primaryTreeName || "주 룬"}
+          />
+          <RunePageBlock
+            page={me.secondaryRunePage}
+            compact
+            fallbackIconUrls={me.secondaryRuneIconUrls || []}
+            fallbackTitle={me.secondaryTreeName || "보조 룬"}
+          />
+          <StatShardBlock
+            rows={me.statShardPage || []}
+            fallbackIconUrls={me.statShardIconUrls || []}
+          />
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function groupItemEvents(
+  events: NonNullable<MatchDetail["buildTimeline"]>["item_events"],
+) {
+  const groups: Array<{
+    minute: number;
+    events: NonNullable<MatchDetail["buildTimeline"]>["item_events"];
+  }> = [];
+  for (const event of events) {
+    const last = groups[groups.length - 1];
+    if (last && last.minute === event.minute) {
+      last.events.push(event);
+    } else {
+      groups.push({ minute: event.minute, events: [event] });
+    }
+  }
+  return groups;
+}
+
+function TimelineNotice({ error }: { error: string | null }) {
+  return (
+    <p className="timeline-notice">
+      {error || "빌드 타임라인을 불러오지 못했습니다."}
+    </p>
+  );
+}
+
+function uniqueSkillEvents(detail: MatchDetail) {
+  const bySlot = new Map<
+    number,
+    NonNullable<MatchDetail["buildTimeline"]>["skill_events"][number]
+  >();
+  for (const event of detail.buildTimeline?.skill_events || []) {
+    const slot = event.skillSlot || event.skill_slot || 0;
+    if (slot && !bySlot.has(slot)) {
+      bySlot.set(slot, event);
+    }
+  }
+  return [...bySlot.entries()]
+    .sort(([left], [right]) => left - right)
+    .map(([, event]) => event);
+}
+
+function RunePageBlock({
+  page,
+  compact = false,
+  fallbackIconUrls = [],
+  fallbackTitle,
+}: {
+  page?: RunePage | null;
+  compact?: boolean;
+  fallbackIconUrls?: Array<string | null>;
+  fallbackTitle: string;
+}) {
+  if (!page || page.slots.length === 0) {
+    return (
+      <div className={`rune-page ${compact ? "compact" : ""}`}>
+        <div className="rune-page-title">
+          <span>{fallbackTitle}</span>
+        </div>
+        <div className="rune-slot selected-only">
+          {fallbackIconUrls.filter(Boolean).map((url, index) => (
+            <span className="rune-icon selected" key={`${url}-${index}`}>
+              <img src={url || ""} alt="" />
+            </span>
+          ))}
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className={`rune-page ${compact ? "compact" : ""}`}>
+      <div className="rune-page-title">
+        {page.treeIconUrl && <img src={page.treeIconUrl} alt="" />}
+        <span>{page.treeName}</span>
+      </div>
+      {page.slots.map((slot, index) => (
+        <div className="rune-slot" key={`${page.treeId}-${index}`}>
+          {slot.map((rune) => (
+            <RuneIcon rune={rune} key={rune.id} />
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function StatShardBlock({
+  rows,
+  fallbackIconUrls = [],
+}: {
+  rows: RuneEntry[][];
+  fallbackIconUrls?: Array<string | null>;
+}) {
+  return (
+    <div className="rune-page stat-shards">
+      <div className="rune-page-title">
+        <span>능력치 파편</span>
+      </div>
+      {rows.length
+        ? rows.map((row, index) => (
+            <div className="rune-slot" key={`stat-${index}`}>
+              {row.map((rune) => (
+                <RuneIcon rune={rune} key={`${index}-${rune.id}`} />
+              ))}
+            </div>
+          ))
+        : fallbackIconUrls.filter(Boolean).map((url, index) => (
+            <div
+              className="rune-slot selected-only"
+              key={`stat-fallback-${index}`}
+            >
+              <span className="rune-icon selected">
+                <img src={url || ""} alt="" />
+              </span>
+            </div>
+          ))}
+    </div>
+  );
+}
+
+function RuneIcon({ rune }: { rune: RuneEntry }) {
+  return (
+    <span
+      className={`rune-icon ${rune.selected ? "selected" : ""}`}
+      title={rune.name}
+    >
+      {rune.iconUrl && <img src={rune.iconUrl} alt="" />}
+    </span>
   );
 }

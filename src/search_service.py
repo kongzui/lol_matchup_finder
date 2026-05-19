@@ -205,7 +205,7 @@ def _is_index_allowed(profile: dict[str, Any] | None) -> bool:
     return TIER_ORDER.get(tier, -1) >= min_tier_value
 
 
-def _fetch_ranked_profile(
+def fetch_ranked_profile(
     client: RiotClient,
     cache: MatchCache,
     puuid: str,
@@ -296,7 +296,7 @@ def run_search(
         puuid = account["puuid"]
 
         status_cb("솔로 랭크 티어를 확인하는 중...")
-        ranked_profile, rank_cache_hits, rank_api_calls = _fetch_ranked_profile(
+        ranked_profile, rank_cache_hits, rank_api_calls = fetch_ranked_profile(
             client,
             cache,
             puuid,
