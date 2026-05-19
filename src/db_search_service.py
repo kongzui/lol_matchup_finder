@@ -18,7 +18,6 @@ from .utils import LANE_LABEL_TO_TEAM_POSITION, date_range_to_unix
 
 
 DB_ENEMY_ALL_LABEL = "전체"
-DB_LIMIT_OPTIONS: tuple[int, ...] = (20, 50, 100, 200)
 
 
 @dataclass(frozen=True)
@@ -32,7 +31,6 @@ class IndexedMatchupSearchRequest:
     custom_start: date
     custom_end: date
     current_patch_only: bool
-    max_results: int
 
 
 @dataclass(frozen=True)
@@ -50,7 +48,6 @@ class IndexedMatchupSearchPayload:
     start_ts: int
     end_ts: int
     patch_prefix: str | None
-    max_results: int
 
 
 def _patch_prefix(version: str) -> str | None:
@@ -103,7 +100,6 @@ def run_indexed_matchup_search(
         start_ts=start_ts,
         end_ts=end_ts,
         patch_prefix=patch_prefix,
-        limit=request.max_results,
     )
 
     return IndexedMatchupSearchPayload(
@@ -118,5 +114,4 @@ def run_indexed_matchup_search(
         start_ts=start_ts,
         end_ts=end_ts,
         patch_prefix=patch_prefix,
-        max_results=request.max_results,
     )

@@ -657,7 +657,6 @@ class MatchCache:
         start_ts: int | None,
         end_ts: int | None,
         patch_prefix: str | None,
-        limit: int,
     ) -> list[dict[str, Any]]:
         """matchup_index만 사용해 DB조회 결과를 가져온다."""
         clauses = [
@@ -680,7 +679,6 @@ class MatchCache:
             params.append(f"{patch_prefix}.%")
 
         where_sql = " AND ".join(clauses)
-        params.append(limit)
 
         with self._connect() as conn:
             rows = conn.execute(
@@ -689,7 +687,6 @@ class MatchCache:
                 FROM matchup_index mi
                 WHERE {where_sql}
                 ORDER BY mi.game_creation DESC
-                LIMIT ?
                 """,
                 tuple(params),
             ).fetchall()

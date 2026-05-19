@@ -11,7 +11,6 @@ from src.champions import ChampionData, ChampionRepository
 from src.config import AppConfig
 from src.db_search_service import (
     DB_ENEMY_ALL_LABEL,
-    DB_LIMIT_OPTIONS,
     IndexedMatchupSearchRequest,
     run_indexed_matchup_search,
 )
@@ -38,6 +37,7 @@ from src.search_service import (
 )
 from src.static_data import StaticData, StaticDataRepository
 from src.ui.components import (
+    clear_match_detail_state,
     render_indexed_matchup_results,
     render_matchup_header,
     render_multi_search_results,
@@ -347,20 +347,13 @@ def _render_db_search_controls(
                 key="db_lane",
             )
 
-        p_period, p_max, p_patch = st.columns([2, 1, 1])
+        p_period, p_patch = st.columns([2, 1])
         with p_period:
             period_kind = st.selectbox(
                 "검색 기간",
                 PERIOD_OPTIONS,
                 index=PERIOD_OPTIONS.index(DEFAULT_PERIOD_LABEL),
                 key="db_period",
-            )
-        with p_max:
-            max_results = st.selectbox(
-                "최대 결과 수",
-                DB_LIMIT_OPTIONS,
-                index=1,
-                key="db_max_results",
             )
         with p_patch:
             current_patch_only = st.checkbox(
@@ -403,7 +396,6 @@ def _render_db_search_controls(
         custom_start=custom_start,
         custom_end=custom_end,
         current_patch_only=bool(current_patch_only),
-        max_results=int(max_results),
     )
     return request, submitted
 
@@ -512,6 +504,7 @@ def _run_submitted_db_search(
     cache: MatchCache,
 ) -> None:
     """DB조회 버튼 클릭 시 matchup_index만 조회하고 세션에 결과를 저장한다."""
+    clear_match_detail_state()
     try:
         payload = run_indexed_matchup_search(
             request=request,

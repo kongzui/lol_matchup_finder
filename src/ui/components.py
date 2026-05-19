@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from hashlib import blake2s
 from html import escape
 from typing import Any
 
@@ -30,6 +31,7 @@ from src.utils import unix_to_kst_datetime_str
 
 
 _MATCH_DETAIL_OPEN_STATE_KEY = "open_match_detail_ids"
+_INDEXED_MATCH_DETAIL_OPEN_STATE_KEY = "indexed_open_match_detail_ids"
 
 
 def _h(value: Any) -> str:
@@ -59,14 +61,24 @@ def _split_player_riot_id(row: dict[str, Any]) -> tuple[str, str]:
     return name, tag
 
 
-def _toggle_match_detail(detail_id: str) -> None:
+def _detail_key_suffix(detail_id: str) -> str:
+    """Streamlit 위젯 key에 쓸 짧고 안정적인 suffix를 만든다."""
+    return blake2s(detail_id.encode("utf-8"), digest_size=8).hexdigest()
+
+
+def _toggle_match_detail(state_key: str, detail_id: str) -> None:
     """매치 상세 패널의 열림 상태를 토글한다."""
-    open_ids = set(st.session_state.get(_MATCH_DETAIL_OPEN_STATE_KEY, []))
+    open_ids = set(st.session_state.get(state_key, []))
     if detail_id in open_ids:
         open_ids.remove(detail_id)
     else:
         open_ids.add(detail_id)
-    st.session_state[_MATCH_DETAIL_OPEN_STATE_KEY] = sorted(open_ids)
+    st.session_state[state_key] = sorted(open_ids)
+
+
+def clear_match_detail_state() -> None:
+    """새 조회를 시작할 때 이전 매치 상세 열림 상태를 초기화한다."""
+    st.session_state[_INDEXED_MATCH_DETAIL_OPEN_STATE_KEY] = []
 
 
 def render_section_title(title: str) -> None:
@@ -218,10 +230,10 @@ def render_indexed_matchup_result_summary(
     <strong>{_h(my_ko)} vs {_h(enemy_ko)}</strong>
     <p>{_h(payload.lane_label)} · {_h(payload.period_kind)} · 패치 {_h(patch_text)}</p>
   </div>
-  <div class="kpi-row">
+    <div class="kpi-row">
     <div class="kpi-card primary"><span>발견</span><strong>{total}</strong><em>경기</em></div>
     <div class="kpi-card"><span>승률</span><strong>{winrate}</strong><em>{wins}승 {losses}패</em></div>
-    <div class="kpi-card"><span>최대</span><strong>{payload.max_results}</strong><em>결과</em></div>
+    <div class="kpi-card"><span>범위</span><strong>전체</strong><em>결과</em></div>
     <div class="kpi-card"><span>API</span><strong>0</strong><em>DB-only</em></div>
   </div>
 </section>
@@ -252,6 +264,7 @@ def render_result_card(
     row_index: int,
     detail_open: bool = False,
     key_prefix: str = "match_detail",
+    state_key: str = _MATCH_DETAIL_OPEN_STATE_KEY,
 ) -> None:
     """결과 카드 요약을 Streamlit 네이티브 요소로 표시한다."""
     result_cls = "win" if row["win"] else "loss"
@@ -385,10 +398,10 @@ def render_result_card(
         with detail_col:
             st.button(
                 "▴" if detail_open else "▾",
-                key=f"{key_prefix}_toggle_{row_index}",
+                key=f"{key_prefix}_toggle_{row_index}_{_detail_key_suffix(detail_id)}",
                 help="매치 상세 닫기" if detail_open else "매치 상세 펼치기",
                 on_click=_toggle_match_detail,
-                args=(detail_id,),
+                args=(state_key, detail_id),
                 use_container_width=True,
             )
 
@@ -624,6 +637,46 @@ def _render_indexed_linked_match_detail(
     st.markdown(detail_html, unsafe_allow_html=True)
 
 
+@st.fragment
+def _render_indexed_result_card_fragment(
+    *,
+    row: dict[str, Any],
+    detail_id: str,
+    row_index: int,
+    champion_data: ChampionData,
+    cache: MatchCache,
+    static_data: StaticData,
+    config: AppConfig,
+) -> None:
+    """DB조회 결과 카드 하나만 독립적으로 다시 그린다."""
+    detail_open = detail_id in set(
+        st.session_state.get(_INDEXED_MATCH_DETAIL_OPEN_STATE_KEY, [])
+    )
+
+    with st.container(
+        border=False,
+        key=f"indexed_match_result_card_{'win' if row['win'] else 'loss'}_{row_index}",
+    ):
+        render_result_card(
+            row,
+            champion_data,
+            static_data,
+            detail_id=detail_id,
+            row_index=row_index,
+            detail_open=detail_open,
+            key_prefix="indexed_match_detail",
+            state_key=_INDEXED_MATCH_DETAIL_OPEN_STATE_KEY,
+        )
+        if detail_open:
+            _render_indexed_linked_match_detail(
+                row=row,
+                champion_data=champion_data,
+                cache=cache,
+                static_data=static_data,
+                config=config,
+            )
+
+
 def render_results(
     payload: SearchPayload,
     champion_data: ChampionData,
@@ -676,6 +729,7 @@ def render_results(
                 detail_id=detail_id,
                 row_index=idx,
                 detail_open=detail_open,
+                state_key=_MATCH_DETAIL_OPEN_STATE_KEY,
             )
             if detail_open:
                 _render_linked_match_detail(
@@ -730,36 +784,23 @@ def render_indexed_matchup_results(
     ]
     valid_detail_ids = set(detail_ids)
     open_ids = (
-        set(st.session_state.get(_MATCH_DETAIL_OPEN_STATE_KEY, [])) & valid_detail_ids
+        set(st.session_state.get(_INDEXED_MATCH_DETAIL_OPEN_STATE_KEY, []))
+        & valid_detail_ids
     )
-    st.session_state[_MATCH_DETAIL_OPEN_STATE_KEY] = sorted(open_ids)
+    st.session_state[_INDEXED_MATCH_DETAIL_OPEN_STATE_KEY] = sorted(open_ids)
 
     for idx, (row, detail_id) in enumerate(
         zip(payload.results, detail_ids, strict=True)
     ):
-        detail_open = detail_id in open_ids
-
-        with st.container(
-            border=False,
-            key=f"indexed_match_result_card_{'win' if row['win'] else 'loss'}_{idx}",
-        ):
-            render_result_card(
-                row,
-                champion_data,
-                static_data,
-                detail_id=detail_id,
-                row_index=idx,
-                detail_open=detail_open,
-                key_prefix="indexed_match_detail",
-            )
-            if detail_open:
-                _render_indexed_linked_match_detail(
-                    row=row,
-                    champion_data=champion_data,
-                    cache=cache,
-                    static_data=static_data,
-                    config=config,
-                )
+        _render_indexed_result_card_fragment(
+            row=row,
+            detail_id=detail_id,
+            row_index=idx,
+            champion_data=champion_data,
+            cache=cache,
+            static_data=static_data,
+            config=config,
+        )
 
     st.download_button(
         label="CSV 다운로드",
