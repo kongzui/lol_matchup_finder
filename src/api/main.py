@@ -259,6 +259,39 @@ def _payload_dict(payload: Any) -> dict[str, Any]:
     )
 
 
+def _result_row_with_assets(row: dict[str, Any]) -> dict[str, Any]:
+    static_data = _get_static_data()
+    enriched = dict(row)
+    enriched["mySummoner1IconUrl"] = static_data.summoner_icon_url(
+        row.get("my_summoner1_id")
+    )
+    enriched["mySummoner2IconUrl"] = static_data.summoner_icon_url(
+        row.get("my_summoner2_id")
+    )
+    enriched["myPrimaryTreeIconUrl"] = static_data.tree_icon_url(
+        row.get("my_primary_tree_id")
+    )
+    enriched["mySecondaryTreeIconUrl"] = static_data.tree_icon_url(
+        row.get("my_secondary_tree_id")
+    )
+    enriched["myPrimaryRuneIconUrls"] = [
+        static_data.rune_icon_url(rune_id)
+        for rune_id in row.get("my_primary_runes", [])
+    ]
+    enriched["mySecondaryRuneIconUrls"] = [
+        static_data.rune_icon_url(rune_id)
+        for rune_id in row.get("my_secondary_runes", [])
+    ]
+    return enriched
+
+
+def _payload_with_result_assets(payload: Any) -> dict[str, Any]:
+    raw = _payload_dict(payload)
+    if "results" in raw:
+        raw["results"] = [_result_row_with_assets(row) for row in raw["results"]]
+    return raw
+
+
 def _result_stats(results: list[dict[str, Any]]) -> dict[str, Any]:
     total = len(results)
     wins = sum(1 for row in results if row.get("win"))
@@ -336,7 +369,9 @@ def _slice_payload(
     raw = _payload_dict(payload)
     results = raw["results"]
     start = (page - 1) * page_size
-    raw["results"] = results[start : start + page_size]
+    raw["results"] = [
+        _result_row_with_assets(row) for row in results[start : start + page_size]
+    ]
     raw["total"] = len(results)
     raw["page"] = page
     raw["pageSize"] = page_size
@@ -610,7 +645,7 @@ def get_job_result(job_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=job.error or "작업 실패")
     if job.status != "succeeded":
         raise HTTPException(status_code=409, detail="job이 아직 완료되지 않았습니다.")
-    return {"kind": job.kind, "payload": _payload_dict(job.result)}
+    return {"kind": job.kind, "payload": _payload_with_result_assets(job.result)}
 
 
 @app.post("/api/db-search")

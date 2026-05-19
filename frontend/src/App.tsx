@@ -951,13 +951,7 @@ function MatchResultCard({
       <div className="player-summary">
         {showPlayerCopy && <span className="player-id">{playerId}</span>}
         <div className="champ-line">
-          <div className="champion">
-            <img
-              src={championIcon(meta.dataDragonVersion, row.my_champion_key)}
-              alt=""
-            />
-            <span>Lv {row.my_champion_level || 0}</span>
-          </div>
+          <ChampionLoadout row={row} meta={meta} />
           <div>
             <strong>
               {row.kills} / <b>{row.deaths}</b> / {row.assists}
@@ -1014,6 +1008,39 @@ function MatchResultCard({
         <button className="icon-button" onClick={onToggle} title="매치 상세">
           {detailOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
         </button>
+      </div>
+    </div>
+  );
+}
+
+function ChampionLoadout({ row, meta }: { row: MatchRow; meta: MetaOptions }) {
+  const primaryRuneIcon = row.myPrimaryRuneIconUrls?.find(Boolean);
+  const secondaryRuneIcon =
+    row.mySecondaryTreeIconUrl || row.mySecondaryRuneIconUrls?.find(Boolean);
+  const miniIcons = [
+    row.mySummoner1IconUrl,
+    row.mySummoner2IconUrl,
+    primaryRuneIcon,
+    secondaryRuneIcon,
+  ];
+
+  return (
+    <div className="champion-loadout">
+      <div className="champion">
+        <img
+          src={championIcon(meta.dataDragonVersion, row.my_champion_key)}
+          alt=""
+        />
+        <span>Lv {row.my_champion_level || 0}</span>
+      </div>
+      <div className="mini-loadout">
+        {miniIcons.map((url, index) =>
+          url ? (
+            <img key={`${url}-${index}`} src={url} alt="" />
+          ) : (
+            <span key={index} />
+          ),
+        )}
       </div>
     </div>
   );

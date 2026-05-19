@@ -86,6 +86,12 @@ export interface MatchRow {
   game_version?: string;
   my_champion_level?: number;
   my_items?: number[];
+  mySummoner1IconUrl?: string | null;
+  mySummoner2IconUrl?: string | null;
+  myPrimaryTreeIconUrl?: string | null;
+  mySecondaryTreeIconUrl?: string | null;
+  myPrimaryRuneIconUrls?: Array<string | null>;
+  mySecondaryRuneIconUrls?: Array<string | null>;
 }
 
 export interface SearchPayload {
