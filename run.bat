@@ -13,14 +13,7 @@ if not exist ".venv\Scripts\python.exe" (
 
 call ".venv\Scripts\activate.bat"
 
-echo Installing Python requirements...
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-if errorlevel 1 (
-    echo Failed to install Python requirements.
-    pause
-    exit /b 1
-)
+echo Skipping Python requirements install.
 
 if not exist "frontend\node_modules" (
     echo Installing frontend dependencies...
@@ -41,4 +34,4 @@ echo Starting React frontend on http://127.0.0.1:5173
 start "lol-matchup-frontend" cmd /k "cd /d %cd%\frontend && npm.cmd run dev"
 
 echo Open http://127.0.0.1:5173 in your browser.
-pause
+exit /b 0
