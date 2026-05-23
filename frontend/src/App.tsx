@@ -49,6 +49,8 @@ const LEGACY_MULTI_SEARCH_HISTORY_KEY =
 const RIOT_ID_HISTORY_LIMIT = 20;
 const ENEMY_CHAMPION_HISTORY_KEY = "lol-matchup-finder:enemy-champion-history";
 const ENEMY_CHAMPION_HISTORY_LIMIT = 20;
+const MY_CHAMPION_HISTORY_KEY = "lol-matchup-finder:my-champion-history";
+const MY_CHAMPION_HISTORY_LIMIT = 4;
 const LANE_ORDER: Record<string, number> = {
   TOP: 0,
   JUNGLE: 1,
@@ -273,6 +275,57 @@ function saveEnemyChampionHistory(history: string[]): void {
   }
 }
 
+function compactMyChampionHistory(
+  values: string[],
+  meta?: MetaOptions,
+): string[] {
+  const championNames = meta
+    ? new Set(meta.champions.map((champion) => champion.koreanName))
+    : null;
+  const seen = new Set<string>();
+  const compacted: string[] = [];
+  for (const value of values) {
+    const champion = value.trim();
+    if (!champion || seen.has(champion)) {
+      continue;
+    }
+    if (championNames && !championNames.has(champion)) {
+      continue;
+    }
+    seen.add(champion);
+    compacted.push(champion);
+    if (compacted.length >= MY_CHAMPION_HISTORY_LIMIT) {
+      break;
+    }
+  }
+  return compacted;
+}
+
+function loadMyChampionHistory(): string[] {
+  try {
+    const raw = window.localStorage.getItem(MY_CHAMPION_HISTORY_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed)
+      ? compactMyChampionHistory(
+          parsed.filter((item) => typeof item === "string"),
+        )
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveMyChampionHistory(history: string[]): void {
+  try {
+    window.localStorage.setItem(
+      MY_CHAMPION_HISTORY_KEY,
+      JSON.stringify(history),
+    );
+  } catch {
+    return;
+  }
+}
+
 function riotId(name?: string, tag?: string, fallback?: string): string {
   if (name && tag) {
     return `${name}#${tag}`;
@@ -362,6 +415,9 @@ export default function App() {
   const [enemyChampionHistory, setEnemyChampionHistory] = useState<string[]>(
     loadEnemyChampionHistory,
   );
+  const [myChampionHistory, setMyChampionHistory] = useState<string[]>(
+    loadMyChampionHistory,
+  );
   const [metaRefreshing, setMetaRefreshing] = useState(false);
   const [metaRefreshError, setMetaRefreshError] = useState<string | null>(null);
 
@@ -395,6 +451,17 @@ export default function App() {
     setEnemyChampionHistory((prev) => {
       const next = compactEnemyChampionHistory(prev, meta);
       saveEnemyChampionHistory(next);
+      return next;
+    });
+  }, [meta]);
+
+  useEffect(() => {
+    if (!meta) {
+      return;
+    }
+    setMyChampionHistory((prev) => {
+      const next = compactMyChampionHistory(prev, meta);
+      saveMyChampionHistory(next);
       return next;
     });
   }, [meta]);
@@ -492,6 +559,8 @@ export default function App() {
             setRiotIdHistory={setRiotIdHistory}
             enemyChampionHistory={enemyChampionHistory}
             setEnemyChampionHistory={setEnemyChampionHistory}
+            myChampionHistory={myChampionHistory}
+            setMyChampionHistory={setMyChampionHistory}
           />
         )}
         {active === "multi" && (
@@ -508,6 +577,8 @@ export default function App() {
             setRiotIdHistory={setRiotIdHistory}
             enemyChampionHistory={enemyChampionHistory}
             setEnemyChampionHistory={setEnemyChampionHistory}
+            myChampionHistory={myChampionHistory}
+            setMyChampionHistory={setMyChampionHistory}
           />
         )}
         {active === "memo" && <PlayerMemoWorkspace />}
@@ -553,12 +624,16 @@ function SearchWorkspace({
   setRiotIdHistory,
   enemyChampionHistory,
   setEnemyChampionHistory,
+  myChampionHistory,
+  setMyChampionHistory,
 }: {
   meta: MetaOptions;
   riotIdHistory: string[];
   setRiotIdHistory: Dispatch<SetStateAction<string[]>>;
   enemyChampionHistory: string[];
   setEnemyChampionHistory: Dispatch<SetStateAction<string[]>>;
+  myChampionHistory: string[];
+  setMyChampionHistory: Dispatch<SetStateAction<string[]>>;
 }) {
   const riotIdInputRef = useRef<HTMLInputElement | null>(null);
   const [body, setBody] = useState<SearchBody>({
@@ -604,6 +679,14 @@ function SearchWorkspace({
     });
   };
 
+  const rememberMyChampionHistory = (myChampion: string) => {
+    setMyChampionHistory((prev) => {
+      const next = compactMyChampionHistory([myChampion, ...prev], meta);
+      saveMyChampionHistory(next);
+      return next;
+    });
+  };
+
   const applyHistoryItem = (riotId: string) => {
     setBody({ ...body, riotIdRaw: riotId });
     window.requestAnimationFrame(() => {
@@ -617,6 +700,7 @@ function SearchWorkspace({
     setPayload(null);
     poller.setError(null);
     const nextBody = { ...body, riotIdRaw: rememberHistory(body.riotIdRaw) };
+    rememberMyChampionHistory(nextBody.myChampionKorean);
     rememberEnemyChampionHistory(nextBody.enemyChampionKorean);
     setBody(nextBody);
     const created = await api.createSearchJob(nextBody);
@@ -648,12 +732,18 @@ function SearchWorkspace({
             onPick={applyHistoryItem}
           />
         </div>
-        <ChampionSelect
-          label="내 챔피언"
-          value={body.myChampionKorean}
-          meta={meta}
-          onChange={(value) => setBody({ ...body, myChampionKorean: value })}
-        />
+        <div className="my-champion-field">
+          <ChampionSelect
+            label="내 챔피언"
+            value={body.myChampionKorean}
+            meta={meta}
+            onChange={(value) => setBody({ ...body, myChampionKorean: value })}
+          />
+          <RecentMyChampionSearches
+            history={myChampionHistory}
+            onPick={(value) => setBody({ ...body, myChampionKorean: value })}
+          />
+        </div>
         <div className="enemy-filter-field">
           <div className="enemy-filter-controls">
             <SelectField
@@ -879,12 +969,16 @@ function DbLookupWorkspace({
   setRiotIdHistory,
   enemyChampionHistory,
   setEnemyChampionHistory,
+  myChampionHistory,
+  setMyChampionHistory,
 }: {
   meta: MetaOptions;
   riotIdHistory: string[];
   setRiotIdHistory: Dispatch<SetStateAction<string[]>>;
   enemyChampionHistory: string[];
   setEnemyChampionHistory: Dispatch<SetStateAction<string[]>>;
+  myChampionHistory: string[];
+  setMyChampionHistory: Dispatch<SetStateAction<string[]>>;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [body, setBody] = useState<DbSearchBody>({
@@ -926,6 +1020,17 @@ function DbLookupWorkspace({
     });
   };
 
+  const rememberMyChampionHistory = (nextBody: DbSearchBody) => {
+    setMyChampionHistory((prev) => {
+      const next = compactMyChampionHistory(
+        [nextBody.myChampionKorean, ...prev],
+        meta,
+      );
+      saveMyChampionHistory(next);
+      return next;
+    });
+  };
+
   const rememberRiotIdHistory = (riotIdsRaw: string) => {
     const normalized = normalizeRiotIdInput(riotIdsRaw);
     if (!normalized) {
@@ -958,6 +1063,7 @@ function DbLookupWorkspace({
       riotIdsRaw: rememberRiotIdHistory(body.riotIdsRaw),
       page: 1,
     };
+    rememberMyChampionHistory(nextBody);
     rememberEnemyChampionHistory(nextBody);
     setBody(nextBody);
     runSearch(nextBody);
@@ -1003,12 +1109,18 @@ function DbLookupWorkspace({
             onPick={applyHistoryItem}
           />
         </div>
-        <ChampionSelect
-          label="내 챔피언"
-          value={body.myChampionKorean}
-          meta={meta}
-          onChange={(value) => setBody({ ...body, myChampionKorean: value })}
-        />
+        <div className="my-champion-field">
+          <ChampionSelect
+            label="내 챔피언"
+            value={body.myChampionKorean}
+            meta={meta}
+            onChange={(value) => setBody({ ...body, myChampionKorean: value })}
+          />
+          <RecentMyChampionSearches
+            history={myChampionHistory}
+            onPick={(value) => setBody({ ...body, myChampionKorean: value })}
+          />
+        </div>
         <div className="enemy-filter-field">
           <div className="enemy-filter-controls">
             <SelectField
@@ -1439,6 +1551,41 @@ function RecentEnemyChampionSearches({
       <span>
         <History size={14} />
         최근 상대 챔피언
+      </span>
+      <div>
+        {history.map((item) => (
+          <button
+            key={item}
+            type="button"
+            onClick={() => onPick(item)}
+            title={item}
+          >
+            {item}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function RecentMyChampionSearches({
+  history,
+  onPick,
+}: {
+  history: string[];
+  onPick: (champion: string) => void;
+}) {
+  if (history.length === 0) {
+    return null;
+  }
+  return (
+    <div
+      className="recent-searches compact-history"
+      aria-label="최근 내 챔피언"
+    >
+      <span>
+        <History size={14} />
+        최근 내 챔피언
       </span>
       <div>
         {history.map((item) => (

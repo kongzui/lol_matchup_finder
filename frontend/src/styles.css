@@ -275,6 +275,7 @@ button {
 }
 
 .riot-id-field,
+.my-champion-field,
 .enemy-filter-field,
 .multi-riot-id-field {
   display: grid;
@@ -342,6 +343,15 @@ button {
 .recent-searches button:hover {
   border-color: #21d19f;
   color: #f4f7fb;
+}
+
+.compact-history {
+  gap: 6px;
+}
+
+.compact-history button {
+  min-height: 28px;
+  padding: 0 8px;
 }
 
 .check-field {
