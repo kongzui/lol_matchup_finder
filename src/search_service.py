@@ -89,6 +89,7 @@ class SearchPayload:
     index_allowed: bool
     index_tier: str | None
     indexed_rows: int
+    memos: dict[str, str]
 
 
 def resolve_puuid(
@@ -301,6 +302,11 @@ def run_search(
     with RiotClient(api_key=config.api_key, region=config.region) as client:
         account = resolve_puuid(client, cache, game_name, tag_line)
         puuid = account["puuid"]
+        cache.save_player_identity(
+            puuid=puuid,
+            game_name=account["game_name"],
+            tag_line=account["tag_line"],
+        )
 
         status_cb("솔로 랭크 티어를 확인하는 중...")
         ranked_profile, rank_cache_hits, rank_api_calls = fetch_ranked_profile(
@@ -372,6 +378,8 @@ def run_search(
                 progress_cb(idx / total)
 
     results.sort(key=lambda row: row.get("game_creation") or 0, reverse=True)
+    memo_puuids = [puuid]
+    memo_puuids.extend(row["enemy_puuid"] for row in results if row.get("enemy_puuid"))
 
     cache.record_search(
         target_riot_id=f"{account['game_name']}#{account['tag_line']}",
@@ -400,4 +408,5 @@ def run_search(
         index_allowed=index_allowed,
         index_tier=(ranked_profile or {}).get("tier"),
         indexed_rows=indexed_rows,
+        memos=cache.get_player_memos(memo_puuids),
     )

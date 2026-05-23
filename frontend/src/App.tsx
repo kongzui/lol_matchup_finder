@@ -8,9 +8,13 @@ import {
   Download,
   ExternalLink,
   History,
+  Plus,
   RefreshCw,
+  Save,
   Search,
   Server,
+  StickyNote,
+  Trash2,
   UploadCloud,
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
@@ -23,9 +27,11 @@ import type {
   JobStatus,
   MatchDetail,
   MatchRow,
+  MemoTarget,
   MetaOptions,
   MultiSearchBody,
   MultiSearchPayload,
+  PlayerMemo,
   RuneEntry,
   RunePage,
   SearchBody,
@@ -33,7 +39,7 @@ import type {
   TeamSummary,
 } from "./types";
 
-type Workspace = "search" | "multi" | "db";
+type Workspace = "search" | "multi" | "db" | "memo";
 type DetailTab = "summary" | "build";
 
 const PAGE_SIZE = 50;
@@ -184,7 +190,9 @@ function compactRiotIdHistory(values: string[]): string[] {
       }
     }
   }
-  return compacted;
+  return compacted.sort((a, b) =>
+    a.localeCompare(b, "ko-KR", { sensitivity: "base" }),
+  );
 }
 
 function readStoredRiotIdHistory(key: string): string[] {
@@ -237,7 +245,7 @@ function compactEnemyChampionHistory(
       break;
     }
   }
-  return compacted;
+  return compacted.sort((a, b) => a.localeCompare(b, "ko-KR"));
 }
 
 function loadEnemyChampionHistory(): string[] {
@@ -270,6 +278,21 @@ function riotId(name?: string, tag?: string, fallback?: string): string {
     return `${name}#${tag}`;
   }
   return fallback || name || "-";
+}
+
+function withMemo(nickname: string, memo?: string | null): string {
+  return memo ? `${nickname} (${memo})` : nickname;
+}
+
+function memoDate(unixSeconds?: number | null): string {
+  if (!unixSeconds) {
+    return "-";
+  }
+  return new Intl.DateTimeFormat("ko-KR", {
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+  }).format(new Date(unixSeconds * 1000));
 }
 
 function secondsToMinutes(seconds?: number): string {
@@ -424,6 +447,12 @@ export default function App() {
             label="DB조회"
             onClick={() => setActive("db")}
           />
+          <NavButton
+            active={active === "memo"}
+            icon={<StickyNote size={18} />}
+            label="유저 메모"
+            onClick={() => setActive("memo")}
+          />
         </nav>
         <div className="server-card">
           <div className="server-title">
@@ -475,10 +504,13 @@ export default function App() {
         {active === "db" && (
           <DbLookupWorkspace
             meta={meta}
+            riotIdHistory={riotIdHistory}
+            setRiotIdHistory={setRiotIdHistory}
             enemyChampionHistory={enemyChampionHistory}
             setEnemyChampionHistory={setEnemyChampionHistory}
           />
         )}
+        {active === "memo" && <PlayerMemoWorkspace />}
       </main>
     </div>
   );
@@ -683,6 +715,21 @@ function SearchWorkspace({
       {payload && (
         <>
           <SearchSummary payload={payload} />
+          <MissingMemoPanel
+            candidates={[
+              {
+                puuid: payload.account.puuid,
+                riot_id: `${payload.account.game_name}#${payload.account.tag_line}`,
+              },
+            ]}
+            memos={payload.memos}
+            onSaved={(puuid, memo) =>
+              setPayload({
+                ...payload,
+                memos: { ...payload.memos, [puuid]: memo },
+              })
+            }
+          />
           <div className="toolbar">
             <a className="tool-button" href={searchCsvUrl(jobId || "")}>
               <Download size={16} />
@@ -694,6 +741,7 @@ function SearchWorkspace({
             meta={meta}
             focusPuuid={payload.account.puuid}
             showPlayerCopy={false}
+            memos={payload.memos}
           />
         </>
       )}
@@ -806,21 +854,41 @@ function MultiCollectWorkspace({
         </button>
       </form>
       <JobProgress job={poller.job} error={poller.error} />
-      {payload && <MultiSummary payload={payload} />}
+      {payload && (
+        <>
+          <MultiSummary payload={payload} />
+          <MissingMemoPanel
+            candidates={payload.resolved_users}
+            memos={payload.memos}
+            onSaved={(puuid, memo) =>
+              setPayload({
+                ...payload,
+                memos: { ...payload.memos, [puuid]: memo },
+              })
+            }
+          />
+        </>
+      )}
     </section>
   );
 }
 
 function DbLookupWorkspace({
   meta,
+  riotIdHistory,
+  setRiotIdHistory,
   enemyChampionHistory,
   setEnemyChampionHistory,
 }: {
   meta: MetaOptions;
+  riotIdHistory: string[];
+  setRiotIdHistory: Dispatch<SetStateAction<string[]>>;
   enemyChampionHistory: string[];
   setEnemyChampionHistory: Dispatch<SetStateAction<string[]>>;
 }) {
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [body, setBody] = useState<DbSearchBody>({
+    riotIdsRaw: "",
     myChampionKorean: meta.champions.find(
       (champ) => champ.koreanName === "아리",
     )
@@ -858,9 +926,38 @@ function DbLookupWorkspace({
     });
   };
 
+  const rememberRiotIdHistory = (riotIdsRaw: string) => {
+    const normalized = normalizeRiotIdInput(riotIdsRaw);
+    if (!normalized) {
+      return riotIdsRaw;
+    }
+    setRiotIdHistory((prev) => {
+      const next = compactRiotIdHistory([normalized, ...prev]);
+      saveRiotIdHistory(next);
+      return next;
+    });
+    return normalized;
+  };
+
+  const applyHistoryItem = (riotId: string) => {
+    const nextValue = appendRiotIdInput(body.riotIdsRaw, riotId);
+    setBody({ ...body, riotIdsRaw: nextValue });
+    window.requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+      textareaRef.current?.setSelectionRange(
+        nextValue.length,
+        nextValue.length,
+      );
+    });
+  };
+
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    const nextBody = { ...body, page: 1 };
+    const nextBody = {
+      ...body,
+      riotIdsRaw: rememberRiotIdHistory(body.riotIdsRaw),
+      page: 1,
+    };
     rememberEnemyChampionHistory(nextBody);
     setBody(nextBody);
     runSearch(nextBody);
@@ -886,9 +983,26 @@ function DbLookupWorkspace({
       <WorkspaceHeader
         eyebrow="DB조회"
         title="matchup_index 빠른 조회"
-        description="Riot API 호출 없이 로컬 DB 인덱스만 사용해 전체 결과 통계와 목록을 확인합니다."
+        description="로컬 DB 인덱스에서 메모 유저 또는 입력 유저의 매치업 통계와 목록을 확인합니다."
       />
       <form className="control-panel" onSubmit={submit}>
+        <div className="multi-riot-id-field">
+          <label className="field textarea-field">
+            <span>조회 유저</span>
+            <textarea
+              ref={textareaRef}
+              value={body.riotIdsRaw}
+              onChange={(event) =>
+                setBody({ ...body, riotIdsRaw: event.target.value })
+              }
+              placeholder={"비우면 메모 유저만\nHide on bush#KR1"}
+            />
+          </label>
+          <RecentRiotIdSearches
+            history={riotIdHistory}
+            onPick={applyHistoryItem}
+          />
+        </div>
         <ChampionSelect
           label="내 챔피언"
           value={body.myChampionKorean}
@@ -988,9 +1102,274 @@ function DbLookupWorkspace({
             meta={meta}
             showPlayerCopy
             clientPagination={false}
+            memos={payload.memos}
           />
         </>
       )}
+    </section>
+  );
+}
+
+function PlayerMemoWorkspace() {
+  const [items, setItems] = useState<PlayerMemo[]>([]);
+  const [riotIdRaw, setRiotIdRaw] = useState("");
+  const [memo, setMemo] = useState("");
+  const [filter, setFilter] = useState("");
+  const [editing, setEditing] = useState<Record<string, string>>({});
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const loadMemos = async () => {
+    const payload = await api.listPlayerMemos();
+    setItems(payload.items);
+    setEditing(
+      Object.fromEntries(payload.items.map((item) => [item.puuid, item.memo])),
+    );
+  };
+
+  useEffect(() => {
+    loadMemos().catch((exc) =>
+      setError(exc instanceof Error ? exc.message : "메모 목록 조회 실패"),
+    );
+  }, []);
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    setSaving(true);
+    setError(null);
+    try {
+      const target = await api.resolvePlayerMemoRiotId(riotIdRaw);
+      await api.upsertPlayerMemo(target.puuid, memo);
+      setRiotIdRaw("");
+      setMemo("");
+      await loadMemos();
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : "메모 저장 실패");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const saveExisting = async (item: PlayerMemo) => {
+    setSaving(true);
+    setError(null);
+    try {
+      await api.upsertPlayerMemo(item.puuid, editing[item.puuid] || "");
+      await loadMemos();
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : "메모 저장 실패");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const deleteMemo = async (item: PlayerMemo) => {
+    const name = riotId(
+      item.riot_id_game_name || undefined,
+      item.riot_id_tag_line || undefined,
+      item.puuid,
+    );
+    if (!window.confirm(`${name} 메모를 삭제할까요?`)) {
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      await api.deletePlayerMemo(item.puuid);
+      await loadMemos();
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : "메모 삭제 실패");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const filteredItems = items.filter((item) => {
+    const query = filter.trim().toLocaleLowerCase();
+    if (!query) {
+      return true;
+    }
+    const name = riotId(
+      item.riot_id_game_name || undefined,
+      item.riot_id_tag_line || undefined,
+      item.summoner_name || item.puuid,
+    ).toLocaleLowerCase();
+    return (
+      name.includes(query) || item.memo.toLocaleLowerCase().includes(query)
+    );
+  });
+
+  return (
+    <section className="screen">
+      <WorkspaceHeader
+        eyebrow="유저 메모"
+        title="관심 유저 관리"
+        description="DB조회 기본 대상이 되는 메모 유저를 추가하고 관리합니다."
+      />
+      <form className="memo-form" onSubmit={submit}>
+        <label className="field">
+          <span>Riot ID</span>
+          <input
+            value={riotIdRaw}
+            onChange={(event) => setRiotIdRaw(event.target.value)}
+            placeholder="Hide on bush#KR1"
+          />
+        </label>
+        <label className="field">
+          <span>메모</span>
+          <input
+            value={memo}
+            onChange={(event) => setMemo(event.target.value)}
+            placeholder="Faker"
+          />
+        </label>
+        <button className="primary-action" type="submit" disabled={saving}>
+          <Plus size={18} />
+          추가
+        </button>
+      </form>
+      {error && <div className="error-box">{error}</div>}
+      <section className="memo-panel">
+        <div className="memo-panel-head">
+          <div>
+            <span>등록된 메모</span>
+            <strong>{items.length}명</strong>
+          </div>
+          <label className="field">
+            <span>검색</span>
+            <input
+              value={filter}
+              onChange={(event) => setFilter(event.target.value)}
+              placeholder="닉네임 또는 메모"
+            />
+          </label>
+        </div>
+        {filteredItems.length === 0 ? (
+          <div className="empty compact">
+            <strong>등록된 메모가 없습니다.</strong>
+          </div>
+        ) : (
+          <div className="memo-list">
+            {filteredItems.map((item) => {
+              const name = riotId(
+                item.riot_id_game_name || undefined,
+                item.riot_id_tag_line || undefined,
+                item.summoner_name || item.puuid,
+              );
+              return (
+                <div className="memo-row" key={item.puuid}>
+                  <div className="memo-player">
+                    <strong>{name}</strong>
+                    <span>수정 {memoDate(item.updated_at)}</span>
+                  </div>
+                  <input
+                    value={editing[item.puuid] ?? item.memo}
+                    onChange={(event) =>
+                      setEditing({
+                        ...editing,
+                        [item.puuid]: event.target.value,
+                      })
+                    }
+                  />
+                  <div className="memo-actions">
+                    <button
+                      className="icon-button"
+                      type="button"
+                      title="저장"
+                      onClick={() => saveExisting(item)}
+                      disabled={saving}
+                    >
+                      <Save size={16} />
+                    </button>
+                    <button
+                      className="icon-button danger"
+                      type="button"
+                      title="삭제"
+                      onClick={() => deleteMemo(item)}
+                      disabled={saving}
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
+    </section>
+  );
+}
+
+function MissingMemoPanel({
+  candidates,
+  memos,
+  onSaved,
+}: {
+  candidates: MemoTarget[];
+  memos: Record<string, string>;
+  onSaved: (puuid: string, memo: string) => void;
+}) {
+  const missing = candidates.filter((candidate) => !memos[candidate.puuid]);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [savingPuuid, setSavingPuuid] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  if (missing.length === 0) {
+    return null;
+  }
+
+  const save = async (candidate: MemoTarget) => {
+    const memo = (drafts[candidate.puuid] || "").trim();
+    if (!memo) {
+      setError("메모를 입력해주세요.");
+      return;
+    }
+    setSavingPuuid(candidate.puuid);
+    setError(null);
+    try {
+      await api.upsertPlayerMemo(candidate.puuid, memo);
+      onSaved(candidate.puuid, memo);
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : "메모 저장 실패");
+    } finally {
+      setSavingPuuid(null);
+    }
+  };
+
+  return (
+    <section className="memo-suggestion">
+      <div className="memo-suggestion-head">
+        <span>처음 검색하는 유저입니다.</span>
+        <strong>메모에 추가할까요?</strong>
+      </div>
+      {error && <p className="memo-suggestion-error">{error}</p>}
+      <div className="memo-suggestion-list">
+        {missing.map((candidate) => (
+          <div className="memo-suggestion-row" key={candidate.puuid}>
+            <strong>{candidate.riot_id}</strong>
+            <input
+              value={drafts[candidate.puuid] || ""}
+              onChange={(event) =>
+                setDrafts({
+                  ...drafts,
+                  [candidate.puuid]: event.target.value,
+                })
+              }
+              placeholder="메모"
+            />
+            <button
+              className="tool-button"
+              type="button"
+              disabled={savingPuuid === candidate.puuid}
+              onClick={() => save(candidate)}
+            >
+              <Plus size={16} />
+              추가
+            </button>
+          </div>
+        ))}
+      </div>
     </section>
   );
 }
@@ -1253,8 +1632,12 @@ function DbSummary({ payload }: { payload: DbSearchPayload }) {
           payload.stats.winRate === null ? "-" : `${payload.stats.winRate}%`,
           `${payload.stats.wins}승 ${payload.stats.losses}패`,
         ],
-        ["페이지", `${payload.results.length}`, "표시 중"],
-        ["API", "0", "DB-only"],
+        ["대상", payload.target_label, `${payload.results.length} 표시 중`],
+        [
+          "캐시/API",
+          `${payload.cache_hits} / ${payload.api_calls}`,
+          "PUUID 조회",
+        ],
       ]}
     />
   );
@@ -1294,12 +1677,14 @@ function MatchResultList({
   meta,
   focusPuuid,
   showPlayerCopy,
+  memos = {},
   clientPagination = true,
 }: {
   rows: MatchRow[];
   meta: MetaOptions;
   focusPuuid?: string;
   showPlayerCopy: boolean;
+  memos?: Record<string, string>;
   clientPagination?: boolean;
 }) {
   const [openIds, setOpenIds] = useState<Set<string>>(new Set());
@@ -1370,6 +1755,8 @@ function MatchResultList({
               row={row}
               meta={meta}
               showPlayerCopy={showPlayerCopy}
+              focusPuuid={focusPuuid}
+              memos={memos}
               detailOpen={openIds.has(id)}
               onToggle={() => toggle(id)}
             />
@@ -1390,12 +1777,16 @@ function MatchResultCard({
   row,
   meta,
   showPlayerCopy,
+  focusPuuid,
+  memos,
   detailOpen,
   onToggle,
 }: {
   row: MatchRow;
   meta: MetaOptions;
   showPlayerCopy: boolean;
+  focusPuuid?: string;
+  memos: Record<string, string>;
   detailOpen: boolean;
   onToggle: () => void;
 }) {
@@ -1408,6 +1799,9 @@ function MatchResultCard({
     row.player_tag_line || player.tag,
   );
   const enemyId = riotId(enemyName, enemyTag, row.enemy_riot_id);
+  const playerPuuid = row.player_puuid || focusPuuid;
+  const playerMemo = playerPuuid ? memos[playerPuuid] : undefined;
+  const enemyMemo = row.enemy_puuid ? memos[row.enemy_puuid] : undefined;
   const enemyLink = opggUrl(enemyName, enemyTag);
   const resultClass = row.win ? "win" : "loss";
   const matchDateLabel = relativeMatchDate(row);
@@ -1421,7 +1815,9 @@ function MatchResultCard({
         <em>{secondsToMinutes(row.game_duration)}</em>
       </div>
       <div className="player-summary">
-        {showPlayerCopy && <span className="player-id">{playerId}</span>}
+        {showPlayerCopy && (
+          <span className="player-id">{withMemo(playerId, playerMemo)}</span>
+        )}
         <div className="champ-line">
           <ChampionLoadout row={row} meta={meta} />
           <div>
@@ -1457,7 +1853,7 @@ function MatchResultCard({
         />
         <div>
           <span>상대 라이너</span>
-          <strong>{enemyName || "-"}</strong>
+          <strong>{withMemo(enemyName || "-", enemyMemo)}</strong>
           <em>
             #{enemyTag || "-"} · {row.enemy_champion_key}
           </em>

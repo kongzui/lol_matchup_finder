@@ -183,7 +183,9 @@ def extract_matchup_result(
             else ""
         ),
         "queue_id": info.get("queueId"),
+        "player_puuid": me.get("puuid"),
         "my_champion_key": me.get("championName"),
+        "enemy_puuid": enemy_laner.get("puuid"),
         "enemy_champion_key": enemy_laner.get("championName"),
         "enemy_riot_id": enemy_riot_id,
         "enemy_game_name": enemy_game_name,

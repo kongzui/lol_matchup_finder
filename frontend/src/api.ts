@@ -6,6 +6,8 @@ import type {
   MatchDetail,
   MetaOptions,
   MultiSearchBody,
+  PlayerMemo,
+  ResolvePlayerMemoPayload,
   SearchBody,
 } from "./types";
 
@@ -54,6 +56,28 @@ export const api = {
       `/api/matches/${encodeURIComponent(matchId)}/detail?playerPuuid=${encodeURIComponent(
         playerPuuid,
       )}`,
+    ),
+  listPlayerMemos: () =>
+    requestJson<{ items: PlayerMemo[] }>("/api/player-memos"),
+  resolvePlayerMemoRiotId: (riotIdRaw: string) =>
+    requestJson<ResolvePlayerMemoPayload>("/api/player-memos/resolve-riot-id", {
+      method: "POST",
+      body: JSON.stringify({ riotIdRaw }),
+    }),
+  upsertPlayerMemo: (puuid: string, memo: string) =>
+    requestJson<{ ok: boolean }>(
+      `/api/player-memos/${encodeURIComponent(puuid)}`,
+      {
+        method: "PUT",
+        body: JSON.stringify({ memo }),
+      },
+    ),
+  deletePlayerMemo: (puuid: string) =>
+    requestJson<{ ok: boolean }>(
+      `/api/player-memos/${encodeURIComponent(puuid)}`,
+      {
+        method: "DELETE",
+      },
     ),
   exportDbSearch: async (body: DbSearchBody) => {
     const response = await fetch("/api/exports/db-search.csv", {

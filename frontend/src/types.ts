@@ -52,6 +52,7 @@ export interface DbSearchBody {
   customStart: string | null;
   customEnd: string | null;
   currentPatchOnly: boolean;
+  riotIdsRaw: string;
   page: number;
   pageSize: number;
 }
@@ -70,6 +71,7 @@ export interface MatchRow {
   game_creation?: number;
   game_date?: string;
   my_champion_key?: string;
+  enemy_puuid?: string;
   enemy_champion_key?: string;
   enemy_riot_id?: string;
   enemy_game_name?: string;
@@ -114,6 +116,7 @@ export interface SearchPayload {
   indexed_rows: number;
   index_allowed: boolean;
   index_tier: string | null;
+  memos: Record<string, string>;
 }
 
 export interface MultiSearchPayload {
@@ -127,6 +130,8 @@ export interface MultiSearchPayload {
   indexed_rows: number;
   period_label: string;
   matches_per_player: number;
+  resolved_users: MemoTarget[];
+  memos: Record<string, string>;
   failures: Array<{ riot_id_raw: string; reason: string }>;
 }
 
@@ -146,11 +151,36 @@ export interface DbSearchPayload {
   lane_label: string;
   period_kind: string;
   patch_prefix: string | null;
+  cache_hits: number;
+  api_calls: number;
+  target_label: string;
+  memos: Record<string, string>;
 }
 
 export interface JobPayload {
   kind: string;
   payload: SearchPayload | MultiSearchPayload;
+}
+
+export interface MemoTarget {
+  puuid: string;
+  riot_id: string;
+}
+
+export interface PlayerMemo {
+  puuid: string;
+  memo: string;
+  updated_at: number;
+  riot_id_game_name?: string | null;
+  riot_id_tag_line?: string | null;
+  summoner_name?: string | null;
+  last_seen_at?: number | null;
+}
+
+export interface ResolvePlayerMemoPayload {
+  puuid: string;
+  gameName: string;
+  tagLine: string;
 }
 
 export interface DetailPlayer {

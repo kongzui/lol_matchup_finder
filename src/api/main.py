@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.cache import MatchCache
+from src.cache import MatchCache, normalize_riot_id_key
 from src.champions import ChampionData, ChampionRepository, champion_icon_url
 from src.config import AppConfig, load_config
 from src.db_search_service import (
@@ -37,6 +37,7 @@ from src.multi_search_service import (
     MULTI_MATCHES_PER_PLAYER_OPTIONS,
     MULTI_PERIOD_OPTIONS,
     MultiSearchRequest,
+    parse_multi_riot_ids,
     run_multi_search,
 )
 from src.riot_client import RiotApiError, RiotClient
@@ -60,6 +61,7 @@ from src.static_data import (
 )
 from src.timeline import extract_player_build_timeline
 from src.utils import LANE_LABELS
+from src.utils import RiotIdParseError, parse_riot_id
 
 
 JobStatus = Literal["queued", "running", "succeeded", "failed"]
@@ -105,8 +107,23 @@ class DbSearchBody(BaseModel):
     custom_start: date | None = Field(alias="customStart", default=None)
     custom_end: date | None = Field(alias="customEnd", default=None)
     current_patch_only: bool = Field(alias="currentPatchOnly", default=False)
+    riot_ids_raw: str = Field(alias="riotIdsRaw", default="")
     page: int = 1
     page_size: int = Field(alias="pageSize", default=50)
+
+
+class PlayerMemoBody(BaseModel):
+    """관심 유저 메모 저장 요청."""
+
+    memo: str
+
+
+class ResolveRiotIdBody(BaseModel):
+    """Riot ID를 PUUID로 변환하는 요청."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    riot_id_raw: str = Field(alias="riotIdRaw")
 
 
 @dataclass
@@ -261,8 +278,157 @@ def _search_request(body: SearchJobBody) -> SearchRequest:
     )
 
 
-def _db_request(body: DbSearchBody) -> IndexedMatchupSearchRequest:
+def _resolve_db_target_users(
+    body: DbSearchBody,
+    *,
+    cache: MatchCache,
+    config: AppConfig,
+) -> tuple[tuple[str, ...], int, int]:
+    riot_ids = parse_multi_riot_ids(body.riot_ids_raw)
+    if not riot_ids:
+        return (), 0, 0
+
+    accounts: list[dict[str, str]] = []
+    missing: list[tuple[str, str]] = []
+    cache_hits = 0
+    api_calls = 0
+
+    for raw_riot_id in riot_ids:
+        try:
+            game_name, tag_line = parse_riot_id(raw_riot_id)
+        except RiotIdParseError as exc:
+            raise RiotApiError(str(exc)) from exc
+
+        cached = cache.get_account(normalize_riot_id_key(game_name, tag_line))
+        if cached is not None:
+            cache_hits += 1
+            accounts.append(
+                {
+                    "puuid": cached["puuid"],
+                    "game_name": cached["game_name"] or game_name,
+                    "tag_line": cached["tag_line"] or tag_line,
+                }
+            )
+            continue
+        missing.append((game_name, tag_line))
+
+    if missing:
+        if not config.api_key:
+            raise RiotApiError(
+                "DB조회 유저 필터를 사용하려면 RIOT_API_KEY가 필요합니다."
+            )
+        with RiotClient(
+            api_key=config.api_key,
+            region=config.region,
+            platform=config.platform,
+        ) as client:
+            for game_name, tag_line in missing:
+                account = client.get_account_by_riot_id(game_name, tag_line)
+                api_calls += 1
+                puuid = account.get("puuid")
+                if not puuid:
+                    raise RiotApiError("Account API 응답에 puuid가 없습니다.")
+                cache.save_account(
+                    normalize_riot_id_key(game_name, tag_line),
+                    puuid=puuid,
+                    game_name=account.get("gameName") or game_name,
+                    tag_line=account.get("tagLine") or tag_line,
+                )
+                accounts.append(
+                    {
+                        "puuid": puuid,
+                        "game_name": account.get("gameName") or game_name,
+                        "tag_line": account.get("tagLine") or tag_line,
+                    }
+                )
+
+    unique_puuids: list[str] = []
+    seen_puuids: set[str] = set()
+    for account in accounts:
+        puuid = account["puuid"]
+        if puuid in seen_puuids:
+            continue
+        seen_puuids.add(puuid)
+        unique_puuids.append(puuid)
+
+    return tuple(unique_puuids), cache_hits, api_calls
+
+
+def _resolve_player_memo_target(body: ResolveRiotIdBody) -> dict[str, Any]:
+    cache = _get_cache()
+    config = _get_config()
+    try:
+        game_name, tag_line = parse_riot_id(body.riot_id_raw)
+    except RiotIdParseError as exc:
+        raise RiotApiError(str(exc)) from exc
+
+    cached = cache.get_account(normalize_riot_id_key(game_name, tag_line))
+    if cached is not None:
+        cache.save_player_identity(
+            puuid=cached["puuid"],
+            game_name=cached["game_name"] or game_name,
+            tag_line=cached["tag_line"] or tag_line,
+        )
+        return {
+            "puuid": cached["puuid"],
+            "gameName": cached["game_name"] or game_name,
+            "tagLine": cached["tag_line"] or tag_line,
+        }
+
+    registered = cache.find_player_by_riot_id(game_name, tag_line)
+    if registered is not None:
+        return {
+            "puuid": registered["puuid"],
+            "gameName": registered["riot_id_game_name"] or game_name,
+            "tagLine": registered["riot_id_tag_line"] or tag_line,
+        }
+
+    if not config.api_key:
+        raise RiotApiError("Riot ID를 새로 확인하려면 RIOT_API_KEY가 필요합니다.")
+
+    with RiotClient(
+        api_key=config.api_key,
+        region=config.region,
+        platform=config.platform,
+    ) as client:
+        account = client.get_account_by_riot_id(game_name, tag_line)
+
+    puuid = account.get("puuid")
+    if not puuid:
+        raise RiotApiError("Account API 응답에 puuid가 없습니다.")
+
+    resolved_game_name = account.get("gameName") or game_name
+    resolved_tag_line = account.get("tagLine") or tag_line
+    cache.save_account(
+        normalize_riot_id_key(game_name, tag_line),
+        puuid=puuid,
+        game_name=resolved_game_name,
+        tag_line=resolved_tag_line,
+    )
+    cache.save_player_identity(
+        puuid=puuid,
+        game_name=resolved_game_name,
+        tag_line=resolved_tag_line,
+    )
+    return {
+        "puuid": puuid,
+        "gameName": resolved_game_name,
+        "tagLine": resolved_tag_line,
+    }
+
+
+def _db_request(
+    body: DbSearchBody,
+    *,
+    cache: MatchCache,
+    config: AppConfig,
+) -> IndexedMatchupSearchRequest:
     custom_start, custom_end = _default_dates(body.custom_start, body.custom_end)
+    target_puuids, cache_hits, api_calls = _resolve_db_target_users(
+        body,
+        cache=cache,
+        config=config,
+    )
     return IndexedMatchupSearchRequest(
         my_champion_korean=body.my_champion_korean,
         enemy_champion_korean=body.enemy_champion_korean,
@@ -271,6 +437,9 @@ def _db_request(body: DbSearchBody) -> IndexedMatchupSearchRequest:
         custom_start=custom_start,
         custom_end=custom_end,
         current_patch_only=body.current_patch_only,
+        target_puuids=target_puuids,
+        resolve_cache_hits=cache_hits,
+        resolve_api_calls=api_calls,
     )
 
 
@@ -701,13 +870,42 @@ def db_search(body: DbSearchBody) -> dict[str, Any]:
     """matchup_index 기반 DB조회를 실행한다."""
     try:
         payload = run_indexed_matchup_search(
-            request=_db_request(body),
+            request=_db_request(body, cache=_get_cache(), config=_get_config()),
             champion_data=_get_champion_data(),
             cache=_get_cache(),
         )
     except RiotApiError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return _slice_payload(payload, body.page, body.page_size)
+
+
+@app.get("/api/player-memos")
+def list_player_memos() -> dict[str, Any]:
+    """등록된 관심 유저 메모 목록을 반환한다."""
+    return {"items": _get_cache().list_player_memos()}
+
+
+@app.post("/api/player-memos/resolve-riot-id")
+def resolve_player_memo_riot_id(body: ResolveRiotIdBody) -> dict[str, Any]:
+    """Riot ID를 메모 저장용 PUUID로 변환한다."""
+    try:
+        return _resolve_player_memo_target(body)
+    except RiotApiError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.put("/api/player-memos/{puuid}")
+def upsert_player_memo(puuid: str, body: PlayerMemoBody) -> dict[str, bool]:
+    """관심 유저 메모를 저장한다."""
+    _get_cache().upsert_player_memo(puuid, body.memo)
+    return {"ok": True}
+
+
+@app.delete("/api/player-memos/{puuid}")
+def delete_player_memo(puuid: str) -> dict[str, bool]:
+    """관심 유저 메모를 삭제한다."""
+    _get_cache().delete_player_memo(puuid)
+    return {"ok": True}
 
 
 @app.get("/api/matches/{match_id}/detail")
@@ -826,7 +1024,7 @@ def export_db_search_csv(body: DbSearchBody) -> Response:
     """DB조회 조건 기준 전체 결과를 CSV로 반환한다."""
     try:
         payload = run_indexed_matchup_search(
-            request=_db_request(body),
+            request=_db_request(body, cache=_get_cache(), config=_get_config()),
             champion_data=_get_champion_data(),
             cache=_get_cache(),
         )

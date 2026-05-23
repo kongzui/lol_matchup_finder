@@ -39,6 +39,9 @@ class IndexedMatchupSearchRequest:
     custom_start: date
     custom_end: date
     current_patch_only: bool
+    target_puuids: tuple[str, ...]
+    resolve_cache_hits: int
+    resolve_api_calls: int
 
 
 @dataclass(frozen=True)
@@ -56,6 +59,8 @@ class IndexedMatchupSearchPayload:
     start_ts: int
     end_ts: int
     patch_prefix: str | None
+    target_label: str
+    memos: dict[str, str]
 
 
 def _patch_prefix(version: str) -> str | None:
@@ -115,13 +120,26 @@ def run_indexed_matchup_search(
         start_ts=start_ts,
         end_ts=end_ts,
         patch_prefix=patch_prefix,
+        player_puuids=list(request.target_puuids) or None,
+        require_player_memo=not request.target_puuids,
     )
+    target_label = (
+        f"입력 유저 {len(request.target_puuids)}명"
+        if request.target_puuids
+        else "메모 유저"
+    )
+    memo_puuids = [
+        puuid
+        for row in results
+        for puuid in (row.get("player_puuid"), row.get("enemy_puuid"))
+        if puuid
+    ]
 
     return IndexedMatchupSearchPayload(
         results=results,
         scanned_total=len(results),
-        cache_hits=0,
-        api_calls=0,
+        cache_hits=request.resolve_cache_hits,
+        api_calls=request.resolve_api_calls,
         my_champion_key=my_champion_key,
         enemy_champion_key=enemy_champion_key,
         lane_label=request.lane_label,
@@ -129,4 +147,6 @@ def run_indexed_matchup_search(
         start_ts=start_ts,
         end_ts=end_ts,
         patch_prefix=patch_prefix,
+        target_label=target_label,
+        memos=cache.get_player_memos(memo_puuids),
     )

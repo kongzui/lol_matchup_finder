@@ -134,6 +134,12 @@ class MatchCache:
                     updated_at INTEGER NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS player_memo (
+                    puuid TEXT PRIMARY KEY,
+                    memo TEXT NOT NULL,
+                    updated_at INTEGER NOT NULL
+                );
+
                 CREATE TABLE IF NOT EXISTS matchup_index (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     match_id TEXT NOT NULL,
@@ -399,6 +405,134 @@ class MatchCache:
             return None
         return row["target_riot_id"]
 
+    # --- player_memo ---
+    def get_player_memo(self, puuid: str) -> str | None:
+        """관심 유저 메모를 가져온다."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT memo FROM player_memo WHERE puuid = ?",
+                (puuid,),
+            ).fetchone()
+        return row["memo"] if row is not None else None
+
+    def get_player_memos(self, puuids: list[str]) -> dict[str, str]:
+        """여러 PUUID의 관심 유저 메모를 한 번에 가져온다."""
+        unique_puuids = list(dict.fromkeys(puuid for puuid in puuids if puuid))
+        if not unique_puuids:
+            return {}
+
+        placeholders = ",".join("?" for _ in unique_puuids)
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT puuid, memo
+                FROM player_memo
+                WHERE puuid IN ({placeholders})
+                """,
+                tuple(unique_puuids),
+            ).fetchall()
+        return {row["puuid"]: row["memo"] for row in rows}
+
+    def list_player_memos(self) -> list[dict[str, Any]]:
+        """등록된 관심 유저 메모 목록을 닉네임 정보와 함께 반환한다."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    pm.puuid,
+                    pm.memo,
+                    pm.updated_at,
+                    pr.riot_id_game_name,
+                    pr.riot_id_tag_line,
+                    pr.summoner_name,
+                    pr.last_seen_at
+                FROM player_memo pm
+                LEFT JOIN player_registry pr ON pr.puuid = pm.puuid
+                ORDER BY pm.updated_at DESC
+                """
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def find_player_by_riot_id(
+        self,
+        game_name: str,
+        tag_line: str,
+    ) -> dict[str, Any] | None:
+        """player_registry에서 Riot ID로 유저를 찾는다."""
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT
+                    puuid,
+                    riot_id_game_name,
+                    riot_id_tag_line,
+                    summoner_name,
+                    last_seen_at
+                FROM player_registry
+                WHERE lower(riot_id_game_name) = lower(?)
+                  AND lower(riot_id_tag_line) = lower(?)
+                """,
+                (game_name, tag_line),
+            ).fetchone()
+        return dict(row) if row is not None else None
+
+    def save_player_identity(
+        self,
+        *,
+        puuid: str,
+        game_name: str | None,
+        tag_line: str | None,
+        summoner_name: str | None = None,
+    ) -> None:
+        """PUUID와 표시용 Riot ID 정보를 player_registry에 저장한다."""
+        now = int(time.time())
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO player_registry (
+                    puuid, riot_id_game_name, riot_id_tag_line,
+                    summoner_name, first_seen_at, last_seen_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(puuid) DO UPDATE SET
+                    riot_id_game_name = COALESCE(excluded.riot_id_game_name, riot_id_game_name),
+                    riot_id_tag_line = COALESCE(excluded.riot_id_tag_line, riot_id_tag_line),
+                    summoner_name = COALESCE(excluded.summoner_name, summoner_name),
+                    last_seen_at = excluded.last_seen_at
+                """,
+                (puuid, game_name, tag_line, summoner_name, now, now),
+            )
+            conn.commit()
+
+    def upsert_player_memo(self, puuid: str, memo: str) -> None:
+        """관심 유저 메모를 저장한다. 빈 메모는 삭제로 처리한다."""
+        normalized_memo = memo.strip()
+        if not normalized_memo:
+            self.delete_player_memo(puuid)
+            return
+
+        now = int(time.time())
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO player_memo (puuid, memo, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(puuid) DO UPDATE SET
+                    memo = excluded.memo,
+                    updated_at = excluded.updated_at
+                """,
+                (puuid, normalized_memo, now),
+            )
+            conn.commit()
+
+    def delete_player_memo(self, puuid: str) -> None:
+        """관심 유저 메모를 삭제한다."""
+        with self._connect() as conn:
+            conn.execute(
+                "DELETE FROM player_memo WHERE puuid = ?",
+                (puuid,),
+            )
+            conn.commit()
+
     # --- ranked_profile_cache ---
     def get_ranked_profile(self, puuid: str, queue_id: int) -> dict[str, Any] | None:
         """캐시된 랭크 프로필을 가져온다."""
@@ -657,11 +791,21 @@ class MatchCache:
         start_ts: int | None,
         end_ts: int | None,
         patch_prefix: str | None,
+        player_puuids: list[str] | None = None,
+        require_player_memo: bool = False,
     ) -> list[dict[str, Any]]:
         """matchup_index만 사용해 DB조회 결과를 가져온다."""
         clauses = ["mi.lane = ?"]
         params: list[Any] = [lane]
 
+        if player_puuids:
+            placeholders = ",".join("?" for _ in player_puuids)
+            clauses.append(f"mi.player_puuid IN ({placeholders})")
+            params.extend(player_puuids)
+        if require_player_memo:
+            clauses.append(
+                "EXISTS (SELECT 1 FROM player_memo pm WHERE pm.puuid = mi.player_puuid)"
+            )
         if player_champion_key:
             clauses.append("mi.player_champion_key = ?")
             params.append(player_champion_key)

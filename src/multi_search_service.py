@@ -58,6 +58,8 @@ class MultiSearchPayload:
     matches_per_player: int
     start_ts: int
     end_ts: int
+    resolved_users: list[dict[str, str]]
+    memos: dict[str, str]
     failures: list[MultiSearchFailure]
 
 
@@ -183,6 +185,11 @@ def run_multi_search(
                 game_name=account["game_name"],
                 tag_line=account["tag_line"],
             )
+            cache.save_player_identity(
+                puuid=account["puuid"],
+                game_name=account["game_name"],
+                tag_line=account["tag_line"],
+            )
             resolved_accounts.append(account)
 
         total_resolved = len(resolved_accounts)
@@ -248,5 +255,15 @@ def run_multi_search(
         matches_per_player=request.matches_per_player,
         start_ts=start_ts,
         end_ts=end_ts,
+        resolved_users=[
+            {
+                "puuid": account["puuid"],
+                "riot_id": f"{account['game_name']}#{account['tag_line']}",
+            }
+            for account in resolved_accounts
+        ],
+        memos=cache.get_player_memos(
+            [account["puuid"] for account in resolved_accounts]
+        ),
         failures=failures,
     )

@@ -15,7 +15,9 @@ def build_results_csv_bytes(payload: SearchPayload) -> bytes:
     csv_rows = [
         {
             "game_date": row["game_date"],
+            "player_memo": payload.memos.get(row.get("player_puuid") or ""),
             "my_champion": row["my_champion_key"],
+            "enemy_memo": payload.memos.get(row.get("enemy_puuid") or ""),
             "enemy_champion": row["enemy_champion_key"],
             "enemy_riot_id": row["enemy_riot_id"],
             "result": "win" if row["win"] else "loss",
@@ -42,9 +44,11 @@ def build_indexed_results_csv_bytes(payload: IndexedMatchupSearchPayload) -> byt
         {
             "game_date": row["game_date"],
             "player_riot_id": row.get("player_riot_id") or "",
+            "player_memo": payload.memos.get(row.get("player_puuid") or ""),
             "player_rank": row.get("player_rank") or "",
             "player_league_points": row.get("player_league_points") or "",
             "my_champion": row["my_champion_key"],
+            "enemy_memo": payload.memos.get(row.get("enemy_puuid") or ""),
             "enemy_champion": row["enemy_champion_key"],
             "enemy_riot_id": row["enemy_riot_id"],
             "result": "win" if row["win"] else "loss",

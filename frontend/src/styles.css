@@ -403,6 +403,159 @@ button {
   color: #f4f7fb;
 }
 
+.empty.compact {
+  padding: 12px;
+}
+
+.memo-form {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.2fr) minmax(220px, 1.2fr) auto;
+  align-items: end;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #303846;
+  border-radius: 8px;
+  background: #171c26;
+}
+
+.memo-panel {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #303846;
+  border-radius: 8px;
+  background: #171c26;
+}
+
+.memo-panel-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 320px);
+  gap: 12px;
+  align-items: end;
+}
+
+.memo-panel-head > div {
+  display: grid;
+  gap: 4px;
+}
+
+.memo-panel-head span,
+.memo-player span {
+  color: #aab4c3;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.memo-panel-head strong {
+  color: #f4f7fb;
+  font-size: 20px;
+}
+
+.memo-list {
+  display: grid;
+  gap: 8px;
+}
+
+.memo-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(220px, 1.4fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid #303846;
+  border-radius: 8px;
+  background: #10141d;
+}
+
+.memo-player {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.memo-player strong {
+  color: #f4f7fb;
+  overflow-wrap: anywhere;
+}
+
+.memo-row input {
+  width: 100%;
+  height: 38px;
+  padding: 0 10px;
+  border: 1px solid #303846;
+  border-radius: 6px;
+  background: #171c26;
+  color: #f4f7fb;
+}
+
+.memo-actions {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.memo-suggestion {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid rgba(33, 209, 159, 0.45);
+  border-radius: 8px;
+  background: #171c26;
+}
+
+.memo-suggestion-head {
+  display: grid;
+  gap: 4px;
+}
+
+.memo-suggestion-head span {
+  color: #21d19f;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.memo-suggestion-head strong {
+  color: #f4f7fb;
+  font-size: 16px;
+}
+
+.memo-suggestion-error {
+  margin: 0;
+  color: #ffb8c0;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.memo-suggestion-list {
+  display: grid;
+  gap: 8px;
+}
+
+.memo-suggestion-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(180px, 1.4fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.memo-suggestion-row strong {
+  color: #d7dee8;
+  overflow-wrap: anywhere;
+}
+
+.memo-suggestion-row input {
+  width: 100%;
+  height: 38px;
+  padding: 0 10px;
+  border: 1px solid #303846;
+  border-radius: 6px;
+  background: #10141d;
+  color: #f4f7fb;
+}
+
+.icon-button.danger {
+  color: #ffb8c0;
+}
+
 .progress-head {
   display: flex;
   justify-content: space-between;
@@ -1229,7 +1382,7 @@ button {
   }
 
   .nav-list {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
   .server-card {
@@ -1238,6 +1391,10 @@ button {
 
   .control-panel,
   .control-panel.multi,
+  .memo-form,
+  .memo-panel-head,
+  .memo-row,
+  .memo-suggestion-row,
   .summary,
   .card-grid,
   .rune-pages {
