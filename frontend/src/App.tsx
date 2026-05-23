@@ -8,6 +8,7 @@ import {
   Download,
   ExternalLink,
   History,
+  Pencil,
   Plus,
   RefreshCw,
   Save,
@@ -16,6 +17,7 @@ import {
   StickyNote,
   Trash2,
   UploadCloud,
+  X,
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, ReactNode, SetStateAction } from "react";
@@ -358,6 +360,36 @@ function memoDate(unixSeconds?: number | null): string {
     month: "numeric",
     day: "numeric",
   }).format(new Date(unixSeconds * 1000));
+}
+
+function playerMemoName(item: PlayerMemo): string {
+  return riotId(
+    item.riot_id_game_name || undefined,
+    item.riot_id_tag_line || undefined,
+    item.summoner_name || item.puuid,
+  );
+}
+
+function groupPlayerMemos(items: PlayerMemo[]) {
+  const groups = new Map<string, PlayerMemo[]>();
+  for (const item of items) {
+    const key = item.memo.trim() || "메모 없음";
+    groups.set(key, [...(groups.get(key) || []), item]);
+  }
+  return [...groups.entries()]
+    .map(([memoText, groupItems]) => ({
+      memoText,
+      items: groupItems.sort((left, right) =>
+        playerMemoName(left).localeCompare(playerMemoName(right), "ko-KR", {
+          sensitivity: "base",
+        }),
+      ),
+    }))
+    .sort((left, right) =>
+      left.memoText.localeCompare(right.memoText, "ko-KR", {
+        sensitivity: "base",
+      }),
+    );
 }
 
 function secondsToMinutes(seconds?: number): string {
@@ -1271,6 +1303,7 @@ function PlayerMemoWorkspace() {
   const [memo, setMemo] = useState("");
   const [filter, setFilter] = useState("");
   const [editing, setEditing] = useState<Record<string, string>>({});
+  const [editingPuuid, setEditingPuuid] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -1280,6 +1313,7 @@ function PlayerMemoWorkspace() {
     setEditing(
       Object.fromEntries(payload.items.map((item) => [item.puuid, item.memo])),
     );
+    setEditingPuuid(null);
   };
 
   useEffect(() => {
@@ -1318,6 +1352,16 @@ function PlayerMemoWorkspace() {
     }
   };
 
+  const startEditing = (item: PlayerMemo) => {
+    setEditing({ ...editing, [item.puuid]: editing[item.puuid] ?? item.memo });
+    setEditingPuuid(item.puuid);
+  };
+
+  const cancelEditing = (item: PlayerMemo) => {
+    setEditing({ ...editing, [item.puuid]: item.memo });
+    setEditingPuuid(null);
+  };
+
   const deleteMemo = async (item: PlayerMemo) => {
     const name = riotId(
       item.riot_id_game_name || undefined,
@@ -1344,15 +1388,12 @@ function PlayerMemoWorkspace() {
     if (!query) {
       return true;
     }
-    const name = riotId(
-      item.riot_id_game_name || undefined,
-      item.riot_id_tag_line || undefined,
-      item.summoner_name || item.puuid,
-    ).toLocaleLowerCase();
+    const name = playerMemoName(item).toLocaleLowerCase();
     return (
       name.includes(query) || item.memo.toLocaleLowerCase().includes(query)
     );
   });
+  const memoGroups = groupPlayerMemos(filteredItems);
 
   return (
     <section className="screen">
@@ -1405,46 +1446,85 @@ function PlayerMemoWorkspace() {
           </div>
         ) : (
           <div className="memo-list">
-            {filteredItems.map((item) => {
-              const name = riotId(
-                item.riot_id_game_name || undefined,
-                item.riot_id_tag_line || undefined,
-                item.summoner_name || item.puuid,
-              );
+            {memoGroups.map((group) => {
               return (
-                <div className="memo-row" key={item.puuid}>
-                  <div className="memo-player">
-                    <strong>{name}</strong>
-                    <span>수정 {memoDate(item.updated_at)}</span>
+                <div className="memo-group" key={group.memoText}>
+                  <div className="memo-group-label">
+                    <strong>{group.memoText}</strong>
+                    <span>{group.items.length}개</span>
                   </div>
-                  <input
-                    value={editing[item.puuid] ?? item.memo}
-                    onChange={(event) =>
-                      setEditing({
-                        ...editing,
-                        [item.puuid]: event.target.value,
-                      })
-                    }
-                  />
-                  <div className="memo-actions">
-                    <button
-                      className="icon-button"
-                      type="button"
-                      title="저장"
-                      onClick={() => saveExisting(item)}
-                      disabled={saving}
-                    >
-                      <Save size={16} />
-                    </button>
-                    <button
-                      className="icon-button danger"
-                      type="button"
-                      title="삭제"
-                      onClick={() => deleteMemo(item)}
-                      disabled={saving}
-                    >
-                      <Trash2 size={16} />
-                    </button>
+                  <div className="memo-group-players">
+                    {group.items.map((item) => {
+                      const isEditing = editingPuuid === item.puuid;
+                      const name = playerMemoName(item);
+                      return (
+                        <div
+                          className={`memo-row ${isEditing ? "editing" : ""}`}
+                          key={item.puuid}
+                        >
+                          {isEditing && (
+                            <div className="memo-edit-cell">
+                              <input
+                                value={editing[item.puuid] ?? item.memo}
+                                onChange={(event) =>
+                                  setEditing({
+                                    ...editing,
+                                    [item.puuid]: event.target.value,
+                                  })
+                                }
+                              />
+                            </div>
+                          )}
+                          <div className="memo-player">
+                            <strong>{name}</strong>
+                            <span>수정 {memoDate(item.updated_at)}</span>
+                          </div>
+                          <div className="memo-actions">
+                            {isEditing ? (
+                              <>
+                                <button
+                                  className="icon-button"
+                                  type="button"
+                                  title="저장"
+                                  onClick={() => saveExisting(item)}
+                                  disabled={saving}
+                                >
+                                  <Save size={16} />
+                                </button>
+                                <button
+                                  className="icon-button"
+                                  type="button"
+                                  title="취소"
+                                  onClick={() => cancelEditing(item)}
+                                  disabled={saving}
+                                >
+                                  <X size={16} />
+                                </button>
+                              </>
+                            ) : (
+                              <button
+                                className="icon-button"
+                                type="button"
+                                title="수정"
+                                onClick={() => startEditing(item)}
+                                disabled={saving}
+                              >
+                                <Pencil size={16} />
+                              </button>
+                            )}
+                            <button
+                              className="icon-button danger"
+                              type="button"
+                              title="삭제"
+                              onClick={() => deleteMemo(item)}
+                              disabled={saving}
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               );

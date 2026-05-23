@@ -691,18 +691,65 @@ button {
 
 .memo-list {
   display: grid;
-  gap: 8px;
+  gap: 10px;
 }
 
-.memo-row {
+.memo-group {
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) minmax(220px, 1.4fr) auto;
+  grid-template-columns: minmax(180px, 0.8fr) minmax(0, 2fr);
   gap: 10px;
-  align-items: center;
   padding: 10px;
   border: 1px solid #303846;
   border-radius: 8px;
   background: #10141d;
+}
+
+.memo-group-label {
+  display: grid;
+  align-content: start;
+  gap: 5px;
+  min-width: 0;
+  padding: 8px;
+  border-radius: 6px;
+  background: #171c26;
+}
+
+.memo-group-label strong {
+  overflow-wrap: anywhere;
+  color: #f4f7fb;
+  font-size: 15px;
+}
+
+.memo-group-label span {
+  color: #aab4c3;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.memo-group-players {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.memo-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid #303846;
+  border-radius: 6px;
+  background: #171c26;
+}
+
+.memo-row.editing {
+  grid-template-columns: minmax(160px, 0.95fr) minmax(180px, 1fr) auto;
+}
+
+.memo-edit-cell {
+  min-width: 0;
 }
 
 .memo-player {
@@ -1632,6 +1679,7 @@ button {
   .history-manager-grid,
   .memo-form,
   .memo-panel-head,
+  .memo-group,
   .memo-row,
   .memo-suggestion-row,
   .summary,
