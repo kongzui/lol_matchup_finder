@@ -178,6 +178,30 @@ function appendRiotIdInput(current: string, riotId: string): string {
   return `${[...currentIds, nextId].join("\n")}\n`;
 }
 
+function appendRiotIdInputs(
+  current: string,
+  riotIds: string[],
+  separator: "line" | "comma" = "line",
+): string {
+  const currentIds = splitRiotIdInput(current);
+  const seen = new Set(currentIds.map((item) => item.toLocaleLowerCase()));
+  const nextIds = [...currentIds];
+  for (const riotId of riotIds) {
+    const normalized = normalizeRiotIdInput(riotId);
+    const key = normalized.toLocaleLowerCase();
+    if (!normalized || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    nextIds.push(normalized);
+  }
+  return nextIds.length
+    ? `${nextIds.join(separator === "comma" ? ", " : "\n")}${
+        separator === "line" ? "\n" : ""
+      }`
+    : "";
+}
+
 function compactRiotIdHistory(values: string[]): string[] {
   const seen = new Set<string>();
   const compacted: string[] = [];
@@ -998,10 +1022,14 @@ function MultiCollectWorkspace({
     });
   };
 
-  const applyMemoGroup = (items: PlayerMemo[]) => {
-    const nextValue = items.reduce(
-      (current, item) => appendRiotIdInput(current, playerMemoName(item)),
+  const applyMemoGroup = (
+    items: PlayerMemo[],
+    separator: "line" | "comma" = "line",
+  ) => {
+    const nextValue = appendRiotIdInputs(
       body.riotIdsRaw,
+      items.map(playerMemoName),
+      separator,
     );
     setBody({ ...body, riotIdsRaw: nextValue });
     window.requestAnimationFrame(() => {
@@ -1040,7 +1068,7 @@ function MultiCollectWorkspace({
               onChange={(event) =>
                 setBody({ ...body, riotIdsRaw: event.target.value })
               }
-              placeholder={"Aoo#chi\nHide on bush#KR1"}
+              placeholder={"Aoo#chi\nHide on bush#KR1, Keria#KR1"}
             />
           </label>
         </div>
@@ -1188,10 +1216,14 @@ function DbLookupWorkspace({
     });
   };
 
-  const applyMemoGroup = (items: PlayerMemo[]) => {
-    const nextValue = items.reduce(
-      (current, item) => appendRiotIdInput(current, playerMemoName(item)),
+  const applyMemoGroup = (
+    items: PlayerMemo[],
+    separator: "line" | "comma" = "line",
+  ) => {
+    const nextValue = appendRiotIdInputs(
       body.riotIdsRaw,
+      items.map(playerMemoName),
+      separator,
     );
     setBody({ ...body, riotIdsRaw: nextValue });
     window.requestAnimationFrame(() => {
@@ -1253,7 +1285,7 @@ function DbLookupWorkspace({
               onChange={(event) =>
                 setBody({ ...body, riotIdsRaw: event.target.value })
               }
-              placeholder={"비우면 메모 유저만\nHide on bush#KR1"}
+              placeholder={"비우면 메모 유저만\nHide on bush#KR1, Keria#KR1"}
             />
           </label>
           <MemoGroupSelect groups={memoGroups} onPick={applyMemoGroup} />
@@ -1751,17 +1783,22 @@ function MemoGroupSelect({
   onPick,
 }: {
   groups: ReturnType<typeof groupPlayerMemos>;
-  onPick: (items: PlayerMemo[]) => void;
+  onPick: (items: PlayerMemo[], separator?: "line" | "comma") => void;
 }) {
+  const allItems = groups.flatMap((group) => group.items);
+
   return (
     <label className="field memo-group-select-field">
       <span>메모 선택</span>
       <select
         value=""
         onChange={(event) => {
-          const group = groups.find(
-            (candidate) => candidate.memoText === event.target.value,
-          );
+          if (event.target.value === "all") {
+            onPick(allItems, "comma");
+            return;
+          }
+          const groupIndex = Number(event.target.value);
+          const group = groups[groupIndex];
           if (group) {
             onPick(group.items);
           }
@@ -1771,8 +1808,9 @@ function MemoGroupSelect({
         <option value="">
           {groups.length ? "메모에서 선택" : "등록된 메모 없음"}
         </option>
-        {groups.map((group) => (
-          <option value={group.memoText} key={group.memoText}>
+        {groups.length > 0 && <option value="all">전체</option>}
+        {groups.map((group, index) => (
+          <option value={index} key={group.memoText}>
             {group.memoText}
           </option>
         ))}
