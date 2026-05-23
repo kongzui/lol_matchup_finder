@@ -288,6 +288,20 @@ class MatchCache:
             )
             conn.commit()
 
+    def get_match_cache_stats(self) -> dict[str, int | None]:
+        """저장된 매치 수와 가장 최근 매치 시각을 반환한다."""
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT COUNT(*) AS match_count, MAX(game_creation) AS last_match_creation
+                FROM match_cache
+                """
+            ).fetchone()
+        return {
+            "match_count": int(row["match_count"] or 0),
+            "last_match_creation": row["last_match_creation"],
+        }
+
     # --- match_timeline_cache ---
     def get_match_timeline(self, match_id: str) -> dict[str, Any] | None:
         """matchId로 저장된 타임라인 JSON을 가져온다."""

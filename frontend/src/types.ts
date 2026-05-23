@@ -25,6 +25,8 @@ export interface MetaOptions {
   platform: string;
   queueId: number;
   latestSearchRiotId: string | null;
+  dbMatchCount: number;
+  dbLastMatchCreation: number | null;
 }
 
 export interface SearchBody {

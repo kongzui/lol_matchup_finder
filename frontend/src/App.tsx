@@ -52,7 +52,9 @@ const RIOT_ID_HISTORY_LIMIT = 20;
 const ENEMY_CHAMPION_HISTORY_KEY = "lol-matchup-finder:enemy-champion-history";
 const ENEMY_CHAMPION_HISTORY_LIMIT = 20;
 const MY_CHAMPION_HISTORY_KEY = "lol-matchup-finder:my-champion-history";
-const MY_CHAMPION_HISTORY_LIMIT = 4;
+const MY_CHAMPION_HISTORY_LIMIT = 6;
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
 const LANE_ORDER: Record<string, number> = {
   TOP: 0,
   JUNGLE: 1,
@@ -92,10 +94,18 @@ function relativeMatchDate(row: MatchRow): string {
     return "-";
   }
 
+  const elapsedMs = new Date().getTime() - date.getTime();
+  if (elapsedMs < HOUR_MS) {
+    return "1시간 미만";
+  }
+  if (elapsedMs < DAY_MS) {
+    return `${Math.floor(elapsedMs / HOUR_MS)}시간 전`;
+  }
+
   const today = startOfLocalDay(new Date());
   const target = startOfLocalDay(date);
   const daysAgo = Math.max(
-    Math.floor((today.getTime() - target.getTime()) / 86_400_000),
+    Math.floor((today.getTime() - target.getTime()) / DAY_MS),
     0,
   );
 
@@ -124,6 +134,32 @@ function exactMatchDate(row: MatchRow): string {
     minute: "2-digit",
     hour12: true,
   }).format(date);
+}
+
+function dbLastMatchText(timestamp?: number | null): string {
+  if (!timestamp) {
+    return "없음";
+  }
+  return new Intl.DateTimeFormat("ko-KR", {
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).format(new Date(timestamp));
+}
+
+function matchPatchVersion(row: MatchRow): string | null {
+  const version = row.game_version?.trim();
+  if (!version) {
+    return null;
+  }
+  const parts = version.split(".");
+  if (parts.length >= 2) {
+    return `${parts[0]}.${parts[1]}`;
+  }
+  return version;
 }
 
 function championIcon(version: string, key?: string): string {
@@ -635,6 +671,16 @@ export default function App() {
           <p>
             {meta.region} · {meta.platform} · queue {meta.queueId}
           </p>
+          <div className="server-db-stats">
+            <p>
+              <span>DB 매치</span>
+              <strong>{meta.dbMatchCount.toLocaleString("ko-KR")}개</strong>
+            </p>
+            <p>
+              <span>마지막 매치</span>
+              <strong>{dbLastMatchText(meta.dbLastMatchCreation)}</strong>
+            </p>
+          </div>
           <div className="data-dragon-row">
             <p>Data Dragon {meta.dataDragonVersion}</p>
             <button
@@ -2408,12 +2454,16 @@ function MatchResultCard({
   const resultClass = row.win ? "win" : "loss";
   const matchDateLabel = relativeMatchDate(row);
   const matchDateTitle = exactMatchDate(row);
+  const patchVersion = matchPatchVersion(row);
 
   return (
     <div className={`card-grid ${resultClass}`}>
       <div className="match-meta">
         <strong>{row.win ? "승리" : "패배"}</strong>
         <span title={matchDateTitle}>{matchDateLabel}</span>
+        {patchVersion && (
+          <span title={row.game_version}>패치 {patchVersion}</span>
+        )}
         <em>{secondsToMinutes(row.game_duration)}</em>
       </div>
       <div className="player-summary">

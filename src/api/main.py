@@ -727,6 +727,7 @@ def _build_meta_options() -> dict[str, Any]:
     champion_data = _get_champion_data()
     static_data = _get_static_data()
     cache = _get_cache()
+    match_cache_stats = cache.get_match_cache_stats()
     champions = [
         {
             "koreanName": korean_name,
@@ -759,6 +760,8 @@ def _build_meta_options() -> dict[str, Any]:
         "platform": config.platform,
         "queueId": config.queue_id,
         "latestSearchRiotId": cache.get_latest_search_riot_id(),
+        "dbMatchCount": match_cache_stats["match_count"],
+        "dbLastMatchCreation": match_cache_stats["last_match_creation"],
     }
 
 
