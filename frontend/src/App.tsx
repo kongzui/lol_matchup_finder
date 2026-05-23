@@ -643,36 +643,42 @@ export default function App() {
           <strong>Matchup Finder</strong>
         </div>
         <nav className="nav-list" aria-label="작업공간">
-          <NavButton
-            active={active === "search"}
-            icon={<Search size={18} />}
-            label="개별유저검색"
-            onClick={() => setActive("search")}
-          />
-          <NavButton
-            active={active === "multi"}
-            icon={<UploadCloud size={18} />}
-            label="멀티서치"
-            onClick={() => setActive("multi")}
-          />
-          <NavButton
-            active={active === "db"}
-            icon={<Database size={18} />}
-            label="DB조회"
-            onClick={() => setActive("db")}
-          />
-          <NavButton
-            active={active === "memo"}
-            icon={<StickyNote size={18} />}
-            label="유저 메모"
-            onClick={() => setActive("memo")}
-          />
-          <NavButton
-            active={active === "history"}
-            icon={<History size={18} />}
-            label="최근검색 관리"
-            onClick={() => setActive("history")}
-          />
+          <div className="nav-section">
+            <span className="nav-section-title">검색 도구</span>
+            <NavButton
+              active={active === "db"}
+              icon={<Database size={18} />}
+              label="DB 조회"
+              onClick={() => setActive("db")}
+            />
+            <NavButton
+              active={active === "search"}
+              icon={<Search size={18} />}
+              label="개별 유저 검색"
+              onClick={() => setActive("search")}
+            />
+            <NavButton
+              active={active === "multi"}
+              icon={<UploadCloud size={18} />}
+              label="멀티서치"
+              onClick={() => setActive("multi")}
+            />
+          </div>
+          <div className="nav-section">
+            <span className="nav-section-title">기록 관리</span>
+            <NavButton
+              active={active === "memo"}
+              icon={<StickyNote size={18} />}
+              label="유저 메모"
+              onClick={() => setActive("memo")}
+            />
+            <NavButton
+              active={active === "history"}
+              icon={<History size={18} />}
+              label="최근검색 관리"
+              onClick={() => setActive("history")}
+            />
+          </div>
         </nav>
         <div className="server-card">
           <div className="server-title">
@@ -918,7 +924,7 @@ function SearchWorkspace({
   return (
     <section className="screen">
       <WorkspaceHeader
-        eyebrow="개별유저검색"
+        eyebrow="개별 유저 검색"
         title="Riot ID 기준 매치업 검색"
         description="최근 솔로 랭크에서 내가 고른 챔피언과 상대 라이너 조건이 맞는 경기만 찾습니다."
       />
@@ -1247,7 +1253,7 @@ function DbLookupWorkspace({
     try {
       setPayload(await api.dbSearch(nextBody));
     } catch (exc) {
-      setError(exc instanceof Error ? exc.message : "DB조회에 실패했습니다.");
+      setError(exc instanceof Error ? exc.message : "DB 조회에 실패했습니다.");
     }
   };
 
@@ -1348,7 +1354,7 @@ function DbLookupWorkspace({
   return (
     <section className="screen">
       <WorkspaceHeader
-        eyebrow="DB조회"
+        eyebrow="DB 조회"
         title="matchup_index 빠른 조회"
         description="로컬 DB 인덱스에서 메모 유저 또는 입력 유저의 매치업 통계와 목록을 확인합니다."
       />
@@ -1442,7 +1448,7 @@ function DbLookupWorkspace({
           </label>
           <button className="primary-action db-submit-action" type="submit">
             <Database size={18} />
-            DB조회 실행
+            DB 조회 실행
           </button>
         </div>
         <RecentRiotIdSearches
@@ -1608,7 +1614,7 @@ function PlayerMemoWorkspace() {
       <WorkspaceHeader
         eyebrow="유저 메모"
         title="관심 유저 관리"
-        description="DB조회 기본 대상이 되는 메모 유저를 추가하고 관리합니다."
+        description="DB 조회 기본 대상이 되는 메모 유저를 추가하고 관리합니다."
       />
       <form className="memo-form" onSubmit={submit}>
         <label className="field">

@@ -87,7 +87,19 @@ button {
 
 .nav-list {
   display: grid;
+  gap: 18px;
+}
+
+.nav-section {
+  display: grid;
   gap: 6px;
+}
+
+.nav-section-title {
+  padding: 0 10px 2px;
+  color: #7f8b9d;
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .nav-button {
@@ -1816,7 +1828,8 @@ button {
   }
 
   .nav-list {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
   }
 
   .server-card {
