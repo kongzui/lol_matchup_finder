@@ -539,7 +539,7 @@ function SearchWorkspace({
     )
       ? "아리"
       : meta.champions[0].koreanName,
-    enemyChampionKorean: meta.dbEnemyAllLabel,
+    enemyChampionKorean: meta.allLabel,
     laneLabel: "미드",
     maxMatches: 100,
   });
@@ -628,7 +628,7 @@ function SearchWorkspace({
               label="상대 챔피언"
               value={body.enemyChampionKorean}
               options={[
-                meta.dbEnemyAllLabel,
+                meta.allLabel,
                 ...meta.champions.map((champ) => champ.koreanName),
               ]}
               onChange={(value) =>
@@ -826,7 +826,7 @@ function DbLookupWorkspace({
     )
       ? "아리"
       : meta.champions[0].koreanName,
-    enemyChampionKorean: meta.dbEnemyAllLabel,
+    enemyChampionKorean: meta.allLabel,
     laneLabel: "미드",
     periodKind: meta.defaultDbPeriod,
     customStart: daysAgoText(90),
@@ -901,7 +901,7 @@ function DbLookupWorkspace({
               label="상대 챔피언"
               value={body.enemyChampionKorean}
               options={[
-                meta.dbEnemyAllLabel,
+                meta.allLabel,
                 ...meta.champions.map((champ) => champ.koreanName),
               ]}
               onChange={(value) =>
@@ -1092,7 +1092,10 @@ function ChampionSelect({
     <SelectField
       label={label}
       value={value}
-      options={meta.champions.map((champion) => champion.koreanName)}
+      options={[
+        meta.allLabel,
+        ...meta.champions.map((champion) => champion.koreanName),
+      ]}
       onChange={onChange}
     />
   );
@@ -1239,7 +1242,7 @@ function MultiSummary({ payload }: { payload: MultiSearchPayload }) {
 function DbSummary({ payload }: { payload: DbSearchPayload }) {
   return (
     <SummaryGrid
-      title={`${payload.my_champion_key} vs ${payload.enemy_champion_key || "전체"}`}
+      title={`${payload.my_champion_key || "전체"} vs ${payload.enemy_champion_key || "전체"}`}
       meta={`${payload.lane_label} · ${payload.period_kind} · ${
         payload.patch_prefix || "전체 패치"
       }`}

@@ -2,7 +2,7 @@
 
 조건:
 - 내 PUUID == target_puuid
-- 내 championName == my_champion_key (영문 키)
+- my_champion_key가 있으면 내 championName == my_champion_key (영문 키)
 - 내 teamPosition == lane (예: "MIDDLE")
 - enemy_champion_key가 있으면 상대팀 같은 라인의 챔피언 == enemy_champion_key
 """
@@ -125,7 +125,7 @@ def extract_focus_view(
 def extract_matchup_result(
     match: dict[str, Any],
     target_puuid: str,
-    my_champion_key: str,
+    my_champion_key: str | None,
     enemy_champion_key: str | None,
     lane: str,
 ) -> dict[str, Any] | None:
@@ -144,7 +144,7 @@ def extract_matchup_result(
     if me is None:
         return None
 
-    if me.get("championName") != my_champion_key:
+    if my_champion_key and me.get("championName") != my_champion_key:
         return None
 
     if me.get("teamPosition") != lane:

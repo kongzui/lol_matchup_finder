@@ -31,8 +31,9 @@ def build_results_csv_bytes(payload: SearchPayload) -> bytes:
 
 def build_results_filename(payload: SearchPayload) -> str:
     """검색 조건 기반 CSV 파일명을 만든다."""
+    my = payload.my_champion_key or "All"
     enemy = payload.enemy_champion_key or "All"
-    return f"matchup_{payload.my_champion_key}_vs_{enemy}.csv"
+    return f"matchup_{my}_vs_{enemy}.csv"
 
 
 def build_indexed_results_csv_bytes(payload: IndexedMatchupSearchPayload) -> bytes:
@@ -59,5 +60,6 @@ def build_indexed_results_csv_bytes(payload: IndexedMatchupSearchPayload) -> byt
 
 def build_indexed_results_filename(payload: IndexedMatchupSearchPayload) -> str:
     """DB조회 조건 기반 CSV 파일명을 만든다."""
+    my = payload.my_champion_key or "All"
     enemy = payload.enemy_champion_key or "All"
-    return f"indexed_matchup_{payload.my_champion_key}_vs_{enemy}.csv"
+    return f"indexed_matchup_{my}_vs_{enemy}.csv"

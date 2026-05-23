@@ -651,7 +651,7 @@ class MatchCache:
     def search_matchup_index(
         self,
         *,
-        player_champion_key: str,
+        player_champion_key: str | None,
         enemy_champion_key: str | None,
         lane: str,
         start_ts: int | None,
@@ -659,12 +659,12 @@ class MatchCache:
         patch_prefix: str | None,
     ) -> list[dict[str, Any]]:
         """matchup_index만 사용해 DB조회 결과를 가져온다."""
-        clauses = [
-            "mi.player_champion_key = ?",
-            "mi.lane = ?",
-        ]
-        params: list[Any] = [player_champion_key, lane]
+        clauses = ["mi.lane = ?"]
+        params: list[Any] = [lane]
 
+        if player_champion_key:
+            clauses.append("mi.player_champion_key = ?")
+            params.append(player_champion_key)
         if enemy_champion_key:
             clauses.append("mi.enemy_champion_key = ?")
             params.append(enemy_champion_key)

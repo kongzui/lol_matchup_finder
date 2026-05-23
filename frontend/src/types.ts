@@ -16,6 +16,7 @@ export interface MetaOptions {
   multiMatchesPerPlayerOptions: number[];
   defaultMultiDays: number;
   defaultMultiMatchesPerPlayer: number;
+  allLabel: string;
   dbEnemyAllLabel: string;
   dataDragonVersion: string;
   staticDataVersion: string;
@@ -106,7 +107,7 @@ export interface SearchPayload {
     game_name: string;
     tag_line: string;
   };
-  my_champion_key: string;
+  my_champion_key: string | null;
   enemy_champion_key: string | null;
   lane_label: string;
   period_kind: string;
@@ -140,7 +141,7 @@ export interface DbSearchPayload {
     losses: number;
     winRate: number | null;
   };
-  my_champion_key: string;
+  my_champion_key: string | null;
   enemy_champion_key: string | null;
   lane_label: string;
   period_kind: string;

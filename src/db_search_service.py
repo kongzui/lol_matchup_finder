@@ -12,12 +12,14 @@ from .riot_client import RiotApiError
 from .search_service import (
     PERIOD_CUSTOM_LABEL,
     PERIOD_PRESETS,
+    SEARCH_ALL_LABEL,
 )
 from .utils import LANE_LABEL_TO_TEAM_POSITION, date_range_to_unix
 
 
-DB_ENEMY_ALL_LABEL = "전체"
-DB_PERIOD_ALL_LABEL = "전체"
+DB_ALL_LABEL = SEARCH_ALL_LABEL
+DB_ENEMY_ALL_LABEL = DB_ALL_LABEL
+DB_PERIOD_ALL_LABEL = DB_ALL_LABEL
 DB_PERIOD_OPTIONS: tuple[str, ...] = (
     DB_PERIOD_ALL_LABEL,
     *PERIOD_PRESETS.keys(),
@@ -47,7 +49,7 @@ class IndexedMatchupSearchPayload:
     scanned_total: int
     cache_hits: int
     api_calls: int
-    my_champion_key: str
+    my_champion_key: str | None
     enemy_champion_key: str | None
     lane_label: str
     period_kind: str
@@ -71,9 +73,11 @@ def run_indexed_matchup_search(
     cache: MatchCache,
 ) -> IndexedMatchupSearchPayload:
     """Riot API 호출 없이 matchup_index에서만 매치업을 조회한다."""
-    my_champion_key = champion_data.to_english_key(request.my_champion_korean)
-    if not my_champion_key:
-        raise RiotApiError("선택한 내 챔피언을 인식하지 못했습니다.")
+    my_champion_key: str | None = None
+    if request.my_champion_korean != DB_ALL_LABEL:
+        my_champion_key = champion_data.to_english_key(request.my_champion_korean)
+        if not my_champion_key:
+            raise RiotApiError("선택한 내 챔피언을 인식하지 못했습니다.")
 
     enemy_champion_key = None
     if request.enemy_champion_korean != DB_ENEMY_ALL_LABEL:
