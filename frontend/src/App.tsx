@@ -13,7 +13,7 @@ import {
   UploadCloud,
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import type { Dispatch, ReactNode, SetStateAction } from "react";
 import { api, searchCsvUrl } from "./api";
 import type {
   DbSearchBody,
@@ -36,8 +36,10 @@ type Workspace = "search" | "multi" | "db";
 type DetailTab = "summary" | "build";
 
 const PAGE_SIZE = 50;
-const MULTI_SEARCH_HISTORY_KEY = "lol-matchup-finder:multi-search-history";
-const MULTI_SEARCH_HISTORY_LIMIT = 20;
+const RIOT_ID_HISTORY_KEY = "lol-matchup-finder:riot-id-history";
+const LEGACY_MULTI_SEARCH_HISTORY_KEY =
+  "lol-matchup-finder:multi-search-history";
+const RIOT_ID_HISTORY_LIMIT = 20;
 const LANE_ORDER: Record<string, number> = {
   TOP: 0,
   JUNGLE: 1,
@@ -80,20 +82,24 @@ function splitRiotId(value?: string): { name: string; tag: string } {
   return { name, tag };
 }
 
-function normalizeMultiSearchInput(value: string): string {
-  return splitMultiSearchInput(value).join("\n");
+function normalizeRiotIdInput(value: string): string {
+  return splitRiotIdInput(value).join("\n");
 }
 
-function splitMultiSearchInput(value: string): string[] {
+function splitRiotIdInput(value: string): string[] {
   return value
     .split(/\r?\n|,/)
     .map((item) => item.trim())
     .filter(Boolean);
 }
 
-function appendMultiSearchInput(current: string, riotId: string): string {
-  const currentIds = splitMultiSearchInput(current);
-  const nextId = normalizeMultiSearchInput(riotId);
+function normalizeSingleRiotIdInput(value: string): string {
+  return splitRiotIdInput(value)[0] || "";
+}
+
+function appendRiotIdInput(current: string, riotId: string): string {
+  const currentIds = splitRiotIdInput(current);
+  const nextId = normalizeRiotIdInput(riotId);
   const nextKey = nextId.toLocaleLowerCase();
   if (
     !nextId ||
@@ -104,18 +110,18 @@ function appendMultiSearchInput(current: string, riotId: string): string {
   return `${[...currentIds, nextId].join("\n")}\n`;
 }
 
-function compactMultiSearchHistory(values: string[]): string[] {
+function compactRiotIdHistory(values: string[]): string[] {
   const seen = new Set<string>();
   const compacted: string[] = [];
   for (const value of values) {
-    for (const riotId of splitMultiSearchInput(value)) {
+    for (const riotId of splitRiotIdInput(value)) {
       const key = riotId.toLocaleLowerCase();
       if (!riotId || seen.has(key)) {
         continue;
       }
       seen.add(key);
       compacted.push(riotId);
-      if (compacted.length >= MULTI_SEARCH_HISTORY_LIMIT) {
+      if (compacted.length >= RIOT_ID_HISTORY_LIMIT) {
         return compacted;
       }
     }
@@ -123,26 +129,28 @@ function compactMultiSearchHistory(values: string[]): string[] {
   return compacted;
 }
 
-function loadMultiSearchHistory(): string[] {
+function readStoredRiotIdHistory(key: string): string[] {
   try {
-    const raw = window.localStorage.getItem(MULTI_SEARCH_HISTORY_KEY);
+    const raw = window.localStorage.getItem(key);
     const parsed = raw ? JSON.parse(raw) : [];
     return Array.isArray(parsed)
-      ? compactMultiSearchHistory(
-          parsed.filter((item) => typeof item === "string"),
-        )
+      ? parsed.filter((item) => typeof item === "string")
       : [];
   } catch {
     return [];
   }
 }
 
-function saveMultiSearchHistory(history: string[]): void {
+function loadRiotIdHistory(): string[] {
+  return compactRiotIdHistory([
+    ...readStoredRiotIdHistory(RIOT_ID_HISTORY_KEY),
+    ...readStoredRiotIdHistory(LEGACY_MULTI_SEARCH_HISTORY_KEY),
+  ]);
+}
+
+function saveRiotIdHistory(history: string[]): void {
   try {
-    window.localStorage.setItem(
-      MULTI_SEARCH_HISTORY_KEY,
-      JSON.stringify(history),
-    );
+    window.localStorage.setItem(RIOT_ID_HISTORY_KEY, JSON.stringify(history));
   } catch {
     return;
   }
@@ -217,6 +225,8 @@ export default function App() {
   const [meta, setMeta] = useState<MetaOptions | null>(null);
   const [active, setActive] = useState<Workspace>("search");
   const [error, setError] = useState<string | null>(null);
+  const [riotIdHistory, setRiotIdHistory] =
+    useState<string[]>(loadRiotIdHistory);
 
   useEffect(() => {
     api
@@ -226,6 +236,20 @@ export default function App() {
         setError(exc instanceof Error ? exc.message : "메타데이터 로딩 실패"),
       );
   }, []);
+
+  useEffect(() => {
+    if (!meta?.latestSearchRiotId) {
+      return;
+    }
+    setRiotIdHistory((prev) => {
+      if (prev.length > 0) {
+        return prev;
+      }
+      const next = compactRiotIdHistory([meta.latestSearchRiotId || ""]);
+      saveRiotIdHistory(next);
+      return next;
+    });
+  }, [meta?.latestSearchRiotId]);
 
   if (error) {
     return <FatalError message={error} />;
@@ -278,8 +302,20 @@ export default function App() {
       </aside>
 
       <main className="workspace">
-        {active === "search" && <SearchWorkspace meta={meta} />}
-        {active === "multi" && <MultiCollectWorkspace meta={meta} />}
+        {active === "search" && (
+          <SearchWorkspace
+            meta={meta}
+            riotIdHistory={riotIdHistory}
+            setRiotIdHistory={setRiotIdHistory}
+          />
+        )}
+        {active === "multi" && (
+          <MultiCollectWorkspace
+            meta={meta}
+            riotIdHistory={riotIdHistory}
+            setRiotIdHistory={setRiotIdHistory}
+          />
+        )}
         {active === "db" && <DbLookupWorkspace meta={meta} />}
       </main>
     </div>
@@ -317,9 +353,18 @@ function NavButton({
   );
 }
 
-function SearchWorkspace({ meta }: { meta: MetaOptions }) {
+function SearchWorkspace({
+  meta,
+  riotIdHistory,
+  setRiotIdHistory,
+}: {
+  meta: MetaOptions;
+  riotIdHistory: string[];
+  setRiotIdHistory: Dispatch<SetStateAction<string[]>>;
+}) {
+  const riotIdInputRef = useRef<HTMLInputElement | null>(null);
   const [body, setBody] = useState<SearchBody>({
-    riotIdRaw: meta.latestSearchRiotId || "",
+    riotIdRaw: "",
     periodKind: meta.defaultPeriod,
     customStart: daysAgoText(90),
     customEnd: todayText(),
@@ -344,11 +389,34 @@ function SearchWorkspace({ meta }: { meta: MetaOptions }) {
     setPayload(result.payload as SearchPayload);
   });
 
+  const rememberHistory = (riotIdRaw: string) => {
+    const normalized = normalizeSingleRiotIdInput(riotIdRaw);
+    if (!normalized) {
+      return riotIdRaw;
+    }
+    setRiotIdHistory((prev) => {
+      const next = compactRiotIdHistory([normalized, ...prev]);
+      saveRiotIdHistory(next);
+      return next;
+    });
+    return normalized;
+  };
+
+  const applyHistoryItem = (riotId: string) => {
+    setBody({ ...body, riotIdRaw: riotId });
+    window.requestAnimationFrame(() => {
+      riotIdInputRef.current?.focus();
+      riotIdInputRef.current?.setSelectionRange(riotId.length, riotId.length);
+    });
+  };
+
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     setPayload(null);
     poller.setError(null);
-    const created = await api.createSearchJob(body);
+    const nextBody = { ...body, riotIdRaw: rememberHistory(body.riotIdRaw) };
+    setBody(nextBody);
+    const created = await api.createSearchJob(nextBody);
     setJobId(created.jobId);
   };
 
@@ -360,16 +428,23 @@ function SearchWorkspace({ meta }: { meta: MetaOptions }) {
         description="최근 솔로 랭크에서 내가 고른 챔피언과 상대 라이너 조건이 맞는 경기만 찾습니다."
       />
       <form className="control-panel" onSubmit={submit}>
-        <label className="field wide">
-          <span>Riot ID</span>
-          <input
-            value={body.riotIdRaw}
-            onChange={(event) =>
-              setBody({ ...body, riotIdRaw: event.target.value })
-            }
-            placeholder="Hide on bush#KR1"
+        <div className="riot-id-field">
+          <label className="field">
+            <span>Riot ID</span>
+            <input
+              ref={riotIdInputRef}
+              value={body.riotIdRaw}
+              onChange={(event) =>
+                setBody({ ...body, riotIdRaw: event.target.value })
+              }
+              placeholder="Hide on bush#KR1"
+            />
+          </label>
+          <RecentRiotIdSearches
+            history={riotIdHistory}
+            onPick={applyHistoryItem}
           />
-        </label>
+        </div>
         <ChampionSelect
           label="내 챔피언"
           value={body.myChampionKorean}
@@ -442,14 +517,21 @@ function SearchWorkspace({ meta }: { meta: MetaOptions }) {
   );
 }
 
-function MultiCollectWorkspace({ meta }: { meta: MetaOptions }) {
+function MultiCollectWorkspace({
+  meta,
+  riotIdHistory,
+  setRiotIdHistory,
+}: {
+  meta: MetaOptions;
+  riotIdHistory: string[];
+  setRiotIdHistory: Dispatch<SetStateAction<string[]>>;
+}) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [body, setBody] = useState<MultiSearchBody>({
     riotIdsRaw: "",
     days: meta.defaultMultiDays,
     matchesPerPlayer: meta.defaultMultiMatchesPerPlayer,
   });
-  const [history, setHistory] = useState<string[]>(loadMultiSearchHistory);
   const [jobId, setJobId] = useState<string | null>(null);
   const [payload, setPayload] = useState<MultiSearchPayload | null>(null);
 
@@ -459,20 +541,20 @@ function MultiCollectWorkspace({ meta }: { meta: MetaOptions }) {
   });
 
   const rememberHistory = (riotIdsRaw: string) => {
-    const normalized = normalizeMultiSearchInput(riotIdsRaw);
+    const normalized = normalizeRiotIdInput(riotIdsRaw);
     if (!normalized) {
       return riotIdsRaw;
     }
-    setHistory((prev) => {
-      const next = compactMultiSearchHistory([normalized, ...prev]);
-      saveMultiSearchHistory(next);
+    setRiotIdHistory((prev) => {
+      const next = compactRiotIdHistory([normalized, ...prev]);
+      saveRiotIdHistory(next);
       return next;
     });
     return normalized;
   };
 
   const applyHistoryItem = (riotId: string) => {
-    const nextValue = appendMultiSearchInput(body.riotIdsRaw, riotId);
+    const nextValue = appendRiotIdInput(body.riotIdsRaw, riotId);
     setBody({ ...body, riotIdsRaw: nextValue });
     window.requestAnimationFrame(() => {
       textareaRef.current?.focus();
@@ -513,26 +595,10 @@ function MultiCollectWorkspace({ meta }: { meta: MetaOptions }) {
               placeholder={"Aoo#chi\nHide on bush#KR1"}
             />
           </label>
-          {history.length > 0 && (
-            <div className="recent-searches" aria-label="최근검색">
-              <span>
-                <History size={14} />
-                최근검색
-              </span>
-              <div>
-                {history.map((item) => (
-                  <button
-                    key={item}
-                    type="button"
-                    onClick={() => applyHistoryItem(item)}
-                    title={item}
-                  >
-                    {item}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
+          <RecentRiotIdSearches
+            history={riotIdHistory}
+            onPick={applyHistoryItem}
+          />
         </div>
         <SelectField
           label="수집 기간"
@@ -730,6 +796,38 @@ function WorkspaceHeader({
       <h1>{title}</h1>
       <p>{description}</p>
     </header>
+  );
+}
+
+function RecentRiotIdSearches({
+  history,
+  onPick,
+}: {
+  history: string[];
+  onPick: (riotId: string) => void;
+}) {
+  if (history.length === 0) {
+    return null;
+  }
+  return (
+    <div className="recent-searches" aria-label="최근검색">
+      <span>
+        <History size={14} />
+        최근검색
+      </span>
+      <div>
+        {history.map((item) => (
+          <button
+            key={item}
+            type="button"
+            onClick={() => onPick(item)}
+            title={item}
+          >
+            {item}
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
 

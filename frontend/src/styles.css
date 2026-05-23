@@ -195,6 +195,7 @@ button {
 .control-panel {
   display: grid;
   grid-template-columns: repeat(6, minmax(120px, 1fr));
+  align-items: start;
   gap: 12px;
   padding: 14px;
   border: 1px solid #303846;
@@ -224,11 +225,17 @@ button {
 .field textarea {
   width: 100%;
   min-height: 40px;
+  align-self: start;
   padding: 0 10px;
   border: 1px solid #303846;
   border-radius: 6px;
   background: #10141d;
   color: #f4f7fb;
+}
+
+.field input,
+.field select {
+  height: 40px;
 }
 
 .field textarea {
@@ -241,11 +248,19 @@ button {
   grid-row: span 2;
 }
 
+.riot-id-field,
 .multi-riot-id-field {
   display: grid;
-  grid-row: span 2;
   gap: 10px;
   min-width: 0;
+}
+
+.riot-id-field {
+  grid-column: span 2;
+}
+
+.multi-riot-id-field {
+  grid-row: span 2;
 }
 
 .multi-riot-id-field .textarea-field {
@@ -1180,7 +1195,8 @@ button {
     display: none;
   }
 
-  .field.wide {
+  .field.wide,
+  .riot-id-field {
     grid-column: auto;
   }
 
