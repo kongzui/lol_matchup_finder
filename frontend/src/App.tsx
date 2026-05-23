@@ -1959,6 +1959,7 @@ function RecentHistoryWorkspace({
         <HistoryManagerSection
           title="내 챔피언 최근검색"
           items={myChampionHistory}
+          fixedItems={["전체"]}
           emptyText="저장된 내 챔피언 최근검색이 없습니다."
           onRemove={(value) =>
             removeStoredHistoryItem(
@@ -1971,6 +1972,7 @@ function RecentHistoryWorkspace({
         <HistoryManagerSection
           title="상대 챔피언 최근검색"
           items={enemyChampionHistory}
+          fixedItems={["전체"]}
           emptyText="저장된 상대 챔피언 최근검색이 없습니다."
           onRemove={(value) =>
             removeStoredHistoryItem(
@@ -1988,34 +1990,43 @@ function RecentHistoryWorkspace({
 function HistoryManagerSection({
   title,
   items,
+  fixedItems = [],
   emptyText,
   onRemove,
 }: {
   title: string;
   items: string[];
+  fixedItems?: string[];
   emptyText: string;
   onRemove: (item: string) => void;
 }) {
+  const visibleItems = [
+    ...fixedItems,
+    ...items.filter((item) => !fixedItems.includes(item)),
+  ];
+
   return (
     <section className="history-manager-section">
       <div className="history-manager-title">
         <History size={15} />
         <h2>{title}</h2>
       </div>
-      {items.length ? (
+      {visibleItems.length ? (
         <div className="history-manager-list">
-          {items.map((item) => (
+          {visibleItems.map((item) => (
             <div className="history-manager-row" key={item}>
               <span title={item}>{item}</span>
-              <button
-                className="icon-button danger"
-                type="button"
-                onClick={() => onRemove(item)}
-                title={`${item} 삭제`}
-                aria-label={`${item} 기록 삭제`}
-              >
-                <Trash2 size={16} />
-              </button>
+              {!fixedItems.includes(item) && (
+                <button
+                  className="icon-button danger"
+                  type="button"
+                  onClick={() => onRemove(item)}
+                  title={`${item} 삭제`}
+                  aria-label={`${item} 기록 삭제`}
+                >
+                  <Trash2 size={16} />
+                </button>
+              )}
             </div>
           ))}
         </div>
@@ -2072,9 +2083,7 @@ function RecentEnemyChampionSearches({
   onPick: (champion: string) => void;
   onRemove?: (champion: string) => void;
 }) {
-  if (history.length === 0) {
-    return null;
-  }
+  const items = ["전체", ...history.filter((item) => item !== "전체")];
   return (
     <div className="recent-searches" aria-label="최근 상대 챔피언">
       <span>
@@ -2082,12 +2091,12 @@ function RecentEnemyChampionSearches({
         최근 상대 챔피언
       </span>
       <div>
-        {history.map((item) => (
+        {items.map((item) => (
           <RecentHistoryChip
             key={item}
             item={item}
             onPick={onPick}
-            onRemove={onRemove}
+            onRemove={item === "전체" ? undefined : onRemove}
           />
         ))}
       </div>
@@ -2104,9 +2113,7 @@ function RecentMyChampionSearches({
   onPick: (champion: string) => void;
   onRemove?: (champion: string) => void;
 }) {
-  if (history.length === 0) {
-    return null;
-  }
+  const items = ["전체", ...history.filter((item) => item !== "전체")];
   return (
     <div
       className="recent-searches compact-history"
@@ -2117,12 +2124,12 @@ function RecentMyChampionSearches({
         최근 내 챔피언
       </span>
       <div>
-        {history.map((item) => (
+        {items.map((item) => (
           <RecentHistoryChip
             key={item}
             item={item}
             onPick={onPick}
-            onRemove={onRemove}
+            onRemove={item === "전체" ? undefined : onRemove}
           />
         ))}
       </div>
