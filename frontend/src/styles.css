@@ -241,6 +241,57 @@ button {
   grid-row: span 2;
 }
 
+.multi-riot-id-field {
+  display: grid;
+  grid-row: span 2;
+  gap: 10px;
+  min-width: 0;
+}
+
+.multi-riot-id-field .textarea-field {
+  grid-row: auto;
+}
+
+.recent-searches {
+  display: grid;
+  gap: 8px;
+}
+
+.recent-searches > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #aab4c3;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.recent-searches > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.recent-searches button {
+  max-width: 100%;
+  min-height: 32px;
+  padding: 0 10px;
+  overflow: hidden;
+  border: 1px solid #303846;
+  border-radius: 6px;
+  background: #10141d;
+  color: #d7dee8;
+  font-size: 12px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recent-searches button:hover {
+  border-color: #21d19f;
+  color: #f4f7fb;
+}
+
 .check-field {
   display: inline-flex;
   align-items: center;

@@ -7,11 +7,12 @@ import {
   Database,
   Download,
   ExternalLink,
+  History,
   Search,
   Server,
   UploadCloud,
 } from "lucide-react";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { api, searchCsvUrl } from "./api";
 import type {
@@ -35,6 +36,8 @@ type Workspace = "search" | "multi" | "db";
 type DetailTab = "summary" | "build";
 
 const PAGE_SIZE = 50;
+const MULTI_SEARCH_HISTORY_KEY = "lol-matchup-finder:multi-search-history";
+const MULTI_SEARCH_HISTORY_LIMIT = 20;
 const LANE_ORDER: Record<string, number> = {
   TOP: 0,
   JUNGLE: 1,
@@ -75,6 +78,74 @@ function opggUrl(gameName?: string, tagLine?: string): string {
 function splitRiotId(value?: string): { name: string; tag: string } {
   const [name = "", tag = ""] = (value || "").split("#", 2);
   return { name, tag };
+}
+
+function normalizeMultiSearchInput(value: string): string {
+  return splitMultiSearchInput(value).join("\n");
+}
+
+function splitMultiSearchInput(value: string): string[] {
+  return value
+    .split(/\r?\n|,/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function appendMultiSearchInput(current: string, riotId: string): string {
+  const currentIds = splitMultiSearchInput(current);
+  const nextId = normalizeMultiSearchInput(riotId);
+  const nextKey = nextId.toLocaleLowerCase();
+  if (
+    !nextId ||
+    currentIds.some((item) => item.toLocaleLowerCase() === nextKey)
+  ) {
+    return currentIds.join("\n");
+  }
+  return `${[...currentIds, nextId].join("\n")}\n`;
+}
+
+function compactMultiSearchHistory(values: string[]): string[] {
+  const seen = new Set<string>();
+  const compacted: string[] = [];
+  for (const value of values) {
+    for (const riotId of splitMultiSearchInput(value)) {
+      const key = riotId.toLocaleLowerCase();
+      if (!riotId || seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      compacted.push(riotId);
+      if (compacted.length >= MULTI_SEARCH_HISTORY_LIMIT) {
+        return compacted;
+      }
+    }
+  }
+  return compacted;
+}
+
+function loadMultiSearchHistory(): string[] {
+  try {
+    const raw = window.localStorage.getItem(MULTI_SEARCH_HISTORY_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed)
+      ? compactMultiSearchHistory(
+          parsed.filter((item) => typeof item === "string"),
+        )
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveMultiSearchHistory(history: string[]): void {
+  try {
+    window.localStorage.setItem(
+      MULTI_SEARCH_HISTORY_KEY,
+      JSON.stringify(history),
+    );
+  } catch {
+    return;
+  }
 }
 
 function riotId(name?: string, tag?: string, fallback?: string): string {
@@ -372,11 +443,13 @@ function SearchWorkspace({ meta }: { meta: MetaOptions }) {
 }
 
 function MultiCollectWorkspace({ meta }: { meta: MetaOptions }) {
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [body, setBody] = useState<MultiSearchBody>({
     riotIdsRaw: "",
     days: meta.defaultMultiDays,
     matchesPerPlayer: meta.defaultMultiMatchesPerPlayer,
   });
+  const [history, setHistory] = useState<string[]>(loadMultiSearchHistory);
   const [jobId, setJobId] = useState<string | null>(null);
   const [payload, setPayload] = useState<MultiSearchPayload | null>(null);
 
@@ -385,11 +458,38 @@ function MultiCollectWorkspace({ meta }: { meta: MetaOptions }) {
     setPayload(result.payload as MultiSearchPayload);
   });
 
+  const rememberHistory = (riotIdsRaw: string) => {
+    const normalized = normalizeMultiSearchInput(riotIdsRaw);
+    if (!normalized) {
+      return riotIdsRaw;
+    }
+    setHistory((prev) => {
+      const next = compactMultiSearchHistory([normalized, ...prev]);
+      saveMultiSearchHistory(next);
+      return next;
+    });
+    return normalized;
+  };
+
+  const applyHistoryItem = (riotId: string) => {
+    const nextValue = appendMultiSearchInput(body.riotIdsRaw, riotId);
+    setBody({ ...body, riotIdsRaw: nextValue });
+    window.requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+      textareaRef.current?.setSelectionRange(
+        nextValue.length,
+        nextValue.length,
+      );
+    });
+  };
+
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     setPayload(null);
     poller.setError(null);
-    const created = await api.createMultiSearchJob(body);
+    const nextBody = { ...body, riotIdsRaw: rememberHistory(body.riotIdsRaw) };
+    setBody(nextBody);
+    const created = await api.createMultiSearchJob(nextBody);
     setJobId(created.jobId);
   };
 
@@ -401,16 +501,39 @@ function MultiCollectWorkspace({ meta }: { meta: MetaOptions }) {
         description="직접 입력한 유저들의 솔로 랭크 match_cache를 저장하고 matchup_index에 반영합니다."
       />
       <form className="control-panel multi" onSubmit={submit}>
-        <label className="field textarea-field">
-          <span>Riot ID 목록</span>
-          <textarea
-            value={body.riotIdsRaw}
-            onChange={(event) =>
-              setBody({ ...body, riotIdsRaw: event.target.value })
-            }
-            placeholder={"Aoo#chi\nHide on bush#KR1"}
-          />
-        </label>
+        <div className="multi-riot-id-field">
+          <label className="field textarea-field">
+            <span>Riot ID 목록</span>
+            <textarea
+              ref={textareaRef}
+              value={body.riotIdsRaw}
+              onChange={(event) =>
+                setBody({ ...body, riotIdsRaw: event.target.value })
+              }
+              placeholder={"Aoo#chi\nHide on bush#KR1"}
+            />
+          </label>
+          {history.length > 0 && (
+            <div className="recent-searches" aria-label="최근검색">
+              <span>
+                <History size={14} />
+                최근검색
+              </span>
+              <div>
+                {history.map((item) => (
+                  <button
+                    key={item}
+                    type="button"
+                    onClick={() => applyHistoryItem(item)}
+                    title={item}
+                  >
+                    {item}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
         <SelectField
           label="수집 기간"
           value={String(body.days)}
