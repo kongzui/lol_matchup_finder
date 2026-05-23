@@ -726,7 +726,12 @@ function SearchWorkspace({
         title="Riot ID 기준 매치업 검색"
         description="최근 솔로 랭크에서 내가 고른 챔피언과 상대 라이너 조건이 맞는 경기만 찾습니다."
       />
-      <form className="control-panel" onSubmit={submit}>
+      <form
+        className={`control-panel search-panel ${
+          body.periodKind === meta.customPeriodLabel ? "custom-period" : ""
+        }`}
+        onSubmit={submit}
+      >
         <div className="riot-id-field">
           <label className="field">
             <span>Riot ID</span>
@@ -739,17 +744,6 @@ function SearchWorkspace({
               placeholder="Hide on bush#KR1"
             />
           </label>
-          <RecentRiotIdSearches
-            history={riotIdHistory}
-            onPick={applyHistoryItem}
-            onRemove={(value) =>
-              removeStoredHistoryItem(
-                value,
-                setRiotIdHistory,
-                saveRiotIdHistory,
-              )
-            }
-          />
         </div>
         <div className="my-champion-field">
           <ChampionSelect
@@ -815,7 +809,7 @@ function SearchWorkspace({
           onChange={(value) => setBody({ ...body, maxMatches: Number(value) })}
         />
         {body.periodKind === meta.customPeriodLabel && (
-          <>
+          <div className="search-custom-period-fields">
             <DateField
               label="시작일"
               value={body.customStart || ""}
@@ -826,12 +820,20 @@ function SearchWorkspace({
               value={body.customEnd || ""}
               onChange={(value) => setBody({ ...body, customEnd: value })}
             />
-          </>
+          </div>
         )}
-        <button className="primary-action" type="submit">
+        <button className="primary-action search-submit-action" type="submit">
           <Search size={18} />
           검색 실행
         </button>
+        <RecentRiotIdSearches
+          className="search-riot-history"
+          history={riotIdHistory}
+          onPick={applyHistoryItem}
+          onRemove={(value) =>
+            removeStoredHistoryItem(value, setRiotIdHistory, saveRiotIdHistory)
+          }
+        />
       </form>
 
       <JobProgress job={poller.job} error={poller.error} />
@@ -950,38 +952,37 @@ function MultiCollectWorkspace({
               placeholder={"Aoo#chi\nHide on bush#KR1"}
             />
           </label>
-          <RecentRiotIdSearches
-            history={riotIdHistory}
-            onPick={applyHistoryItem}
-            onRemove={(value) =>
-              removeStoredHistoryItem(
-                value,
-                setRiotIdHistory,
-                saveRiotIdHistory,
-              )
+        </div>
+        <div className="multi-options">
+          <SelectField
+            label="수집 기간"
+            value={String(body.days)}
+            options={meta.multiPeriodOptions.map(String)}
+            format={(value) => `최근 ${value}일`}
+            onChange={(value) => setBody({ ...body, days: Number(value) })}
+          />
+          <SelectField
+            label="1인당 최대 매치"
+            value={String(body.matchesPerPlayer)}
+            options={meta.multiMatchesPerPlayerOptions.map(String)}
+            format={(value) => `${value}판`}
+            onChange={(value) =>
+              setBody({ ...body, matchesPerPlayer: Number(value) })
             }
           />
         </div>
-        <SelectField
-          label="수집 기간"
-          value={String(body.days)}
-          options={meta.multiPeriodOptions.map(String)}
-          format={(value) => `최근 ${value}일`}
-          onChange={(value) => setBody({ ...body, days: Number(value) })}
-        />
-        <SelectField
-          label="1인당 최대 매치"
-          value={String(body.matchesPerPlayer)}
-          options={meta.multiMatchesPerPlayerOptions.map(String)}
-          format={(value) => `${value}판`}
-          onChange={(value) =>
-            setBody({ ...body, matchesPerPlayer: Number(value) })
-          }
-        />
-        <button className="primary-action" type="submit">
+        <button className="primary-action multi-submit-action" type="submit">
           <UploadCloud size={18} />
           수집 실행
         </button>
+        <RecentRiotIdSearches
+          className="multi-riot-history"
+          history={riotIdHistory}
+          onPick={applyHistoryItem}
+          onRemove={(value) =>
+            removeStoredHistoryItem(value, setRiotIdHistory, saveRiotIdHistory)
+          }
+        />
       </form>
       <JobProgress job={poller.job} error={poller.error} />
       {payload && (
@@ -1131,7 +1132,12 @@ function DbLookupWorkspace({
         title="matchup_index 빠른 조회"
         description="로컬 DB 인덱스에서 메모 유저 또는 입력 유저의 매치업 통계와 목록을 확인합니다."
       />
-      <form className="control-panel" onSubmit={submit}>
+      <form
+        className={`control-panel db-panel ${
+          body.periodKind === meta.customPeriodLabel ? "custom-period" : ""
+        }`}
+        onSubmit={submit}
+      >
         <div className="multi-riot-id-field">
           <label className="field textarea-field">
             <span>조회 유저</span>
@@ -1144,17 +1150,6 @@ function DbLookupWorkspace({
               placeholder={"비우면 메모 유저만\nHide on bush#KR1"}
             />
           </label>
-          <RecentRiotIdSearches
-            history={riotIdHistory}
-            onPick={applyHistoryItem}
-            onRemove={(value) =>
-              removeStoredHistoryItem(
-                value,
-                setRiotIdHistory,
-                saveRiotIdHistory,
-              )
-            }
-          />
         </div>
         <div className="my-champion-field">
           <ChampionSelect
@@ -1201,6 +1196,16 @@ function DbLookupWorkspace({
               onChange={(value) => setBody({ ...body, periodKind: value })}
             />
           </div>
+          <label className="check-field db-filter-option">
+            <input
+              type="checkbox"
+              checked={body.currentPatchOnly}
+              onChange={(event) =>
+                setBody({ ...body, currentPatchOnly: event.target.checked })
+              }
+            />
+            <span>이번 패치만</span>
+          </label>
           <RecentEnemyChampionSearches
             history={enemyChampionHistory}
             onPick={(value) => setBody({ ...body, enemyChampionKorean: value })}
@@ -1214,7 +1219,7 @@ function DbLookupWorkspace({
           />
         </div>
         {body.periodKind === meta.customPeriodLabel && (
-          <>
+          <div className="db-custom-period-fields">
             <DateField
               label="시작일"
               value={body.customStart || ""}
@@ -1225,22 +1230,20 @@ function DbLookupWorkspace({
               value={body.customEnd || ""}
               onChange={(value) => setBody({ ...body, customEnd: value })}
             />
-          </>
+          </div>
         )}
-        <label className="check-field">
-          <input
-            type="checkbox"
-            checked={body.currentPatchOnly}
-            onChange={(event) =>
-              setBody({ ...body, currentPatchOnly: event.target.checked })
-            }
-          />
-          <span>이번 패치만</span>
-        </label>
-        <button className="primary-action" type="submit">
+        <button className="primary-action db-submit-action" type="submit">
           <Database size={18} />
           DB조회 실행
         </button>
+        <RecentRiotIdSearches
+          className="db-riot-history"
+          history={riotIdHistory}
+          onPick={applyHistoryItem}
+          onRemove={(value) =>
+            removeStoredHistoryItem(value, setRiotIdHistory, saveRiotIdHistory)
+          }
+        />
       </form>
 
       {error && <div className="error-box">{error}</div>}
@@ -1566,10 +1569,12 @@ function WorkspaceHeader({
 }
 
 function RecentRiotIdSearches({
+  className = "",
   history,
   onPick,
   onRemove,
 }: {
+  className?: string;
   history: string[];
   onPick: (riotId: string) => void;
   onRemove: (riotId: string) => void;
@@ -1578,7 +1583,10 @@ function RecentRiotIdSearches({
     return null;
   }
   return (
-    <div className="recent-searches" aria-label="최근검색">
+    <div
+      className={`recent-searches ${className}`.trim()}
+      aria-label="최근검색"
+    >
       <span>
         <History size={14} />
         최근검색

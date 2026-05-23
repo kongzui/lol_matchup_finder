@@ -230,7 +230,101 @@ button {
 }
 
 .control-panel.multi {
-  grid-template-columns: minmax(260px, 2fr) repeat(3, minmax(140px, 1fr));
+  grid-template-columns: minmax(260px, 1.4fr) minmax(280px, 1.6fr) minmax(
+      140px,
+      auto
+    );
+  grid-template-areas:
+    "users options action"
+    "recent recent recent";
+}
+
+.control-panel.search-panel {
+  grid-template-columns:
+    minmax(200px, 1.1fr) minmax(130px, 0.75fr) repeat(3, minmax(110px, 1fr))
+    minmax(100px, 0.65fr) minmax(130px, auto);
+  grid-template-areas:
+    "riot my enemy enemy enemy max action"
+    "recent recent recent recent recent recent recent";
+}
+
+.control-panel.search-panel.custom-period {
+  grid-template-areas:
+    "riot my enemy enemy enemy max action"
+    "dates dates dates dates dates dates dates"
+    "recent recent recent recent recent recent recent";
+}
+
+.search-custom-period-fields {
+  display: grid;
+  grid-area: dates;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.search-submit-action {
+  grid-area: action;
+  width: 100%;
+}
+
+.search-riot-history {
+  grid-area: recent;
+  min-width: 0;
+}
+
+.multi-options {
+  display: grid;
+  grid-area: options;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.multi-submit-action {
+  grid-area: action;
+  width: 100%;
+}
+
+.multi-riot-history {
+  grid-area: recent;
+  min-width: 0;
+}
+
+.control-panel.db-panel {
+  grid-template-columns:
+    minmax(220px, 1.15fr) minmax(140px, 0.85fr) repeat(3, minmax(120px, 1fr))
+    minmax(150px, auto);
+  grid-template-areas:
+    "users my enemy enemy enemy action"
+    "users recent recent recent recent recent";
+}
+
+.control-panel.db-panel.custom-period {
+  grid-template-areas:
+    "users my enemy enemy enemy action"
+    "users dates dates recent recent recent";
+}
+
+.db-filter-option {
+  min-height: 28px;
+  color: #aab4c3;
+  font-size: 12px;
+}
+
+.db-custom-period-fields {
+  display: grid;
+  grid-area: dates;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.db-submit-action {
+  grid-area: action;
+  width: 100%;
+}
+
+.db-riot-history {
+  grid-area: recent;
+  min-width: 0;
 }
 
 .field {
@@ -303,6 +397,39 @@ button {
 
 .multi-riot-id-field .textarea-field {
   grid-row: auto;
+}
+
+.search-panel .riot-id-field {
+  grid-area: riot;
+}
+
+.search-panel .my-champion-field {
+  grid-area: my;
+}
+
+.search-panel .enemy-filter-field {
+  grid-area: enemy;
+}
+
+.search-panel > .field {
+  grid-area: max;
+}
+
+.multi .multi-riot-id-field {
+  grid-area: users;
+  grid-row: auto;
+}
+
+.db-panel .multi-riot-id-field {
+  grid-area: users;
+}
+
+.db-panel .my-champion-field {
+  grid-area: my;
+}
+
+.db-panel .enemy-filter-field {
+  grid-area: enemy;
 }
 
 .recent-searches {
@@ -1466,7 +1593,41 @@ button {
     grid-column: auto;
   }
 
+  .control-panel.db-panel,
+  .control-panel.db-panel.custom-period,
+  .control-panel.search-panel,
+  .control-panel.search-panel.custom-period,
+  .control-panel.multi {
+    grid-template-areas: none;
+  }
+
+  .search-panel .riot-id-field,
+  .search-panel .my-champion-field,
+  .search-panel .enemy-filter-field,
+  .search-panel > .field,
+  .search-custom-period-fields,
+  .search-submit-action,
+  .search-riot-history,
+  .multi .multi-riot-id-field,
+  .multi-options,
+  .multi-submit-action,
+  .multi-riot-history,
+  .db-panel .multi-riot-id-field,
+  .db-panel .my-champion-field,
+  .db-panel .enemy-filter-field,
+  .db-custom-period-fields,
+  .db-submit-action,
+  .db-riot-history {
+    grid-area: auto;
+  }
+
+  .search-custom-period-fields,
+  .multi-options,
   .enemy-filter-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .db-custom-period-fields {
     grid-template-columns: 1fr;
   }
 
