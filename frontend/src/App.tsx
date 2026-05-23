@@ -539,11 +539,7 @@ function SearchWorkspace({
     )
       ? "아리"
       : meta.champions[0].koreanName,
-    enemyChampionKorean: meta.champions.find(
-      (champ) => champ.koreanName === "사일러스",
-    )
-      ? "사일러스"
-      : meta.champions[0].koreanName,
+    enemyChampionKorean: meta.dbEnemyAllLabel,
     laneLabel: "미드",
     maxMatches: 100,
   });
@@ -628,10 +624,13 @@ function SearchWorkspace({
         />
         <div className="enemy-filter-field">
           <div className="enemy-filter-controls">
-            <ChampionSelect
+            <SelectField
               label="상대 챔피언"
               value={body.enemyChampionKorean}
-              meta={meta}
+              options={[
+                meta.dbEnemyAllLabel,
+                ...meta.champions.map((champ) => champ.koreanName),
+              ]}
               onChange={(value) =>
                 setBody({ ...body, enemyChampionKorean: value })
               }

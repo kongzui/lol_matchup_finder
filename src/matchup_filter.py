@@ -4,7 +4,7 @@
 - 내 PUUID == target_puuid
 - 내 championName == my_champion_key (영문 키)
 - 내 teamPosition == lane (예: "MIDDLE")
-- 상대팀 같은 라인의 챔피언 == enemy_champion_key
+- enemy_champion_key가 있으면 상대팀 같은 라인의 챔피언 == enemy_champion_key
 """
 
 from __future__ import annotations
@@ -126,7 +126,7 @@ def extract_matchup_result(
     match: dict[str, Any],
     target_puuid: str,
     my_champion_key: str,
-    enemy_champion_key: str,
+    enemy_champion_key: str | None,
     lane: str,
 ) -> dict[str, Any] | None:
     """조건에 맞으면 결과 row를, 아니면 None을 반환한다."""
@@ -161,7 +161,7 @@ def extract_matchup_result(
     if enemy_laner is None:
         return None
 
-    if enemy_laner.get("championName") != enemy_champion_key:
+    if enemy_champion_key and enemy_laner.get("championName") != enemy_champion_key:
         return None
 
     enemy_game_name = enemy_laner.get("riotIdGameName")

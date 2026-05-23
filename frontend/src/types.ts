@@ -107,7 +107,7 @@ export interface SearchPayload {
     tag_line: string;
   };
   my_champion_key: string;
-  enemy_champion_key: string;
+  enemy_champion_key: string | null;
   lane_label: string;
   period_kind: string;
   indexed_rows: number;

@@ -36,6 +36,7 @@ PERIOD_PRESETS: dict[str, int] = {
 PERIOD_CUSTOM_LABEL = "직접 지정"
 PERIOD_OPTIONS: tuple[str, ...] = tuple(PERIOD_PRESETS.keys()) + (PERIOD_CUSTOM_LABEL,)
 DEFAULT_PERIOD_LABEL = "최근 30일"
+SEARCH_ENEMY_ALL_LABEL = "전체"
 INDEX_MIN_TIER = "DIAMOND"
 SOLO_RANK_QUEUE_TYPE = "RANKED_SOLO_5x5"
 TIER_ORDER: dict[str, int] = {
@@ -79,7 +80,7 @@ class SearchPayload:
     api_calls: int
     account: dict[str, Any]
     my_champion_key: str
-    enemy_champion_key: str
+    enemy_champion_key: str | None
     lane_label: str
     period_kind: str
     start_ts: int
@@ -270,11 +271,14 @@ def run_search(
     game_name, tag_line = parse_riot_id(request.riot_id_raw)
 
     my_champion_key = champion_data.to_english_key(request.my_champion_korean)
-    enemy_champion_key = champion_data.to_english_key(request.enemy_champion_korean)
-    if not my_champion_key or not enemy_champion_key:
-        raise RiotApiError(
-            "선택한 챔피언을 인식하지 못했습니다. 목록을 새로고침해주세요."
-        )
+    if not my_champion_key:
+        raise RiotApiError("선택한 내 챔피언을 인식하지 못했습니다.")
+
+    enemy_champion_key = None
+    if request.enemy_champion_korean != SEARCH_ENEMY_ALL_LABEL:
+        enemy_champion_key = champion_data.to_english_key(request.enemy_champion_korean)
+        if not enemy_champion_key:
+            raise RiotApiError("선택한 상대 챔피언을 인식하지 못했습니다.")
 
     if request.lane_label not in LANE_LABEL_TO_TEAM_POSITION:
         raise RiotApiError("선택한 라인을 인식하지 못했습니다.")
@@ -371,7 +375,7 @@ def run_search(
         target_puuid=puuid,
         queue_id=config.queue_id,
         my_champion=my_champion_key,
-        enemy_champion=enemy_champion_key,
+        enemy_champion=enemy_champion_key or SEARCH_ENEMY_ALL_LABEL,
         lane=lane_value,
         start_time=start_ts,
         end_time=end_ts,
