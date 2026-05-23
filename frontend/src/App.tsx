@@ -39,7 +39,7 @@ import type {
   TeamSummary,
 } from "./types";
 
-type Workspace = "search" | "multi" | "db" | "memo";
+type Workspace = "search" | "multi" | "db" | "memo" | "history";
 type DetailTab = "summary" | "build";
 
 const PAGE_SIZE = 50;
@@ -532,6 +532,12 @@ export default function App() {
             label="유저 메모"
             onClick={() => setActive("memo")}
           />
+          <NavButton
+            active={active === "history"}
+            icon={<History size={18} />}
+            label="최근검색 관리"
+            onClick={() => setActive("history")}
+          />
         </nav>
         <div className="server-card">
           <div className="server-title">
@@ -594,6 +600,16 @@ export default function App() {
           />
         )}
         {active === "memo" && <PlayerMemoWorkspace />}
+        {active === "history" && (
+          <RecentHistoryWorkspace
+            riotIdHistory={riotIdHistory}
+            setRiotIdHistory={setRiotIdHistory}
+            enemyChampionHistory={enemyChampionHistory}
+            setEnemyChampionHistory={setEnemyChampionHistory}
+            myChampionHistory={myChampionHistory}
+            setMyChampionHistory={setMyChampionHistory}
+          />
+        )}
       </main>
     </div>
   );
@@ -755,13 +771,6 @@ function SearchWorkspace({
           <RecentMyChampionSearches
             history={myChampionHistory}
             onPick={(value) => setBody({ ...body, myChampionKorean: value })}
-            onRemove={(value) =>
-              removeStoredHistoryItem(
-                value,
-                setMyChampionHistory,
-                saveMyChampionHistory,
-              )
-            }
           />
         </div>
         <div className="enemy-filter-field">
@@ -793,13 +802,6 @@ function SearchWorkspace({
           <RecentEnemyChampionSearches
             history={enemyChampionHistory}
             onPick={(value) => setBody({ ...body, enemyChampionKorean: value })}
-            onRemove={(value) =>
-              removeStoredHistoryItem(
-                value,
-                setEnemyChampionHistory,
-                saveEnemyChampionHistory,
-              )
-            }
           />
         </div>
         <SelectField
@@ -830,9 +832,6 @@ function SearchWorkspace({
           className="search-riot-history"
           history={riotIdHistory}
           onPick={applyHistoryItem}
-          onRemove={(value) =>
-            removeStoredHistoryItem(value, setRiotIdHistory, saveRiotIdHistory)
-          }
         />
       </form>
 
@@ -979,9 +978,6 @@ function MultiCollectWorkspace({
           className="multi-riot-history"
           history={riotIdHistory}
           onPick={applyHistoryItem}
-          onRemove={(value) =>
-            removeStoredHistoryItem(value, setRiotIdHistory, saveRiotIdHistory)
-          }
         />
       </form>
       <JobProgress job={poller.job} error={poller.error} />
@@ -1161,13 +1157,6 @@ function DbLookupWorkspace({
           <RecentMyChampionSearches
             history={myChampionHistory}
             onPick={(value) => setBody({ ...body, myChampionKorean: value })}
-            onRemove={(value) =>
-              removeStoredHistoryItem(
-                value,
-                setMyChampionHistory,
-                saveMyChampionHistory,
-              )
-            }
           />
         </div>
         <div className="enemy-filter-field">
@@ -1209,13 +1198,6 @@ function DbLookupWorkspace({
           <RecentEnemyChampionSearches
             history={enemyChampionHistory}
             onPick={(value) => setBody({ ...body, enemyChampionKorean: value })}
-            onRemove={(value) =>
-              removeStoredHistoryItem(
-                value,
-                setEnemyChampionHistory,
-                saveEnemyChampionHistory,
-              )
-            }
           />
         </div>
         {body.periodKind === meta.customPeriodLabel && (
@@ -1240,9 +1222,6 @@ function DbLookupWorkspace({
           className="db-riot-history"
           history={riotIdHistory}
           onPick={applyHistoryItem}
-          onRemove={(value) =>
-            removeStoredHistoryItem(value, setRiotIdHistory, saveRiotIdHistory)
-          }
         />
       </form>
 
@@ -1568,6 +1547,107 @@ function WorkspaceHeader({
   );
 }
 
+function RecentHistoryWorkspace({
+  riotIdHistory,
+  setRiotIdHistory,
+  enemyChampionHistory,
+  setEnemyChampionHistory,
+  myChampionHistory,
+  setMyChampionHistory,
+}: {
+  riotIdHistory: string[];
+  setRiotIdHistory: Dispatch<SetStateAction<string[]>>;
+  enemyChampionHistory: string[];
+  setEnemyChampionHistory: Dispatch<SetStateAction<string[]>>;
+  myChampionHistory: string[];
+  setMyChampionHistory: Dispatch<SetStateAction<string[]>>;
+}) {
+  return (
+    <section className="screen">
+      <WorkspaceHeader
+        eyebrow="최근검색 관리"
+        title="최근검색 목록 정리"
+        description="검색 화면에서는 최근검색을 고르는 데만 쓰고, 삭제는 여기서만 처리합니다."
+      />
+      <div className="history-manager-grid">
+        <HistoryManagerSection
+          title="유저 최근검색"
+          items={riotIdHistory}
+          emptyText="저장된 유저 최근검색이 없습니다."
+          onRemove={(value) =>
+            removeStoredHistoryItem(value, setRiotIdHistory, saveRiotIdHistory)
+          }
+        />
+        <HistoryManagerSection
+          title="내 챔피언 최근검색"
+          items={myChampionHistory}
+          emptyText="저장된 내 챔피언 최근검색이 없습니다."
+          onRemove={(value) =>
+            removeStoredHistoryItem(
+              value,
+              setMyChampionHistory,
+              saveMyChampionHistory,
+            )
+          }
+        />
+        <HistoryManagerSection
+          title="상대 챔피언 최근검색"
+          items={enemyChampionHistory}
+          emptyText="저장된 상대 챔피언 최근검색이 없습니다."
+          onRemove={(value) =>
+            removeStoredHistoryItem(
+              value,
+              setEnemyChampionHistory,
+              saveEnemyChampionHistory,
+            )
+          }
+        />
+      </div>
+    </section>
+  );
+}
+
+function HistoryManagerSection({
+  title,
+  items,
+  emptyText,
+  onRemove,
+}: {
+  title: string;
+  items: string[];
+  emptyText: string;
+  onRemove: (item: string) => void;
+}) {
+  return (
+    <section className="history-manager-section">
+      <div className="history-manager-title">
+        <History size={15} />
+        <h2>{title}</h2>
+      </div>
+      {items.length ? (
+        <div className="history-manager-list">
+          {items.map((item) => (
+            <div className="history-manager-row" key={item}>
+              <span title={item}>{item}</span>
+              <button
+                className="icon-button danger"
+                type="button"
+                onClick={() => onRemove(item)}
+                title={`${item} 삭제`}
+                aria-label={`${item} 기록 삭제`}
+              >
+                <Trash2 size={16} />
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="empty compact">{emptyText}</div>
+      )}
+    </section>
+  );
+}
+
 function RecentRiotIdSearches({
   className = "",
   history,
@@ -1577,7 +1657,7 @@ function RecentRiotIdSearches({
   className?: string;
   history: string[];
   onPick: (riotId: string) => void;
-  onRemove: (riotId: string) => void;
+  onRemove?: (riotId: string) => void;
 }) {
   if (history.length === 0) {
     return null;
@@ -1612,7 +1692,7 @@ function RecentEnemyChampionSearches({
 }: {
   history: string[];
   onPick: (champion: string) => void;
-  onRemove: (champion: string) => void;
+  onRemove?: (champion: string) => void;
 }) {
   if (history.length === 0) {
     return null;
@@ -1644,7 +1724,7 @@ function RecentMyChampionSearches({
 }: {
   history: string[];
   onPick: (champion: string) => void;
-  onRemove: (champion: string) => void;
+  onRemove?: (champion: string) => void;
 }) {
   if (history.length === 0) {
     return null;
@@ -1679,10 +1759,10 @@ function RecentHistoryChip({
 }: {
   item: string;
   onPick: (item: string) => void;
-  onRemove: (item: string) => void;
+  onRemove?: (item: string) => void;
 }) {
   return (
-    <span className="recent-chip-wrap">
+    <span className={`recent-chip-wrap ${onRemove ? "" : "plain"}`.trim()}>
       <button
         className="recent-chip"
         type="button"
@@ -1691,15 +1771,17 @@ function RecentHistoryChip({
       >
         {item}
       </button>
-      <button
-        className="recent-remove"
-        type="button"
-        onClick={() => onRemove(item)}
-        title={`${item} 삭제`}
-        aria-label={`${item} 기록 삭제`}
-      >
-        ×
-      </button>
+      {onRemove && (
+        <button
+          className="recent-remove"
+          type="button"
+          onClick={() => onRemove(item)}
+          title={`${item} 삭제`}
+          aria-label={`${item} 기록 삭제`}
+        >
+          ×
+        </button>
+      )}
     </span>
   );
 }

@@ -459,6 +459,10 @@ button {
   padding: 5px 5px 0 0;
 }
 
+.recent-chip-wrap.plain {
+  padding: 0;
+}
+
 .recent-searches .recent-chip {
   max-width: 100%;
   min-height: 32px;
@@ -472,6 +476,10 @@ button {
   font-weight: 800;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.recent-chip-wrap.plain .recent-chip {
+  padding: 0 10px;
 }
 
 .recent-searches .recent-chip:hover {
@@ -501,6 +509,68 @@ button {
 .recent-searches .recent-remove:hover {
   border-color: #ff6b7a;
   color: #ffb8c0;
+}
+
+.history-manager-grid {
+  display: grid;
+  grid-template-columns: minmax(260px, 1.4fr) minmax(220px, 1fr) minmax(
+      220px,
+      1fr
+    );
+  gap: 12px;
+}
+
+.history-manager-section {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid #303846;
+  border-radius: 8px;
+  background: #171c26;
+}
+
+.history-manager-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #f4f7fb;
+}
+
+.history-manager-title svg {
+  color: #21d19f;
+}
+
+.history-manager-title h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.history-manager-list {
+  display: grid;
+  gap: 8px;
+}
+
+.history-manager-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 6px 6px 6px 10px;
+  border: 1px solid #303846;
+  border-radius: 8px;
+  background: #10141d;
+}
+
+.history-manager-row span {
+  overflow: hidden;
+  color: #d7dee8;
+  font-size: 13px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .compact-history {
@@ -1550,7 +1620,7 @@ button {
   }
 
   .nav-list {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
   }
 
   .server-card {
@@ -1559,6 +1629,7 @@ button {
 
   .control-panel,
   .control-panel.multi,
+  .history-manager-grid,
   .memo-form,
   .memo-panel-head,
   .memo-row,
