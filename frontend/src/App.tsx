@@ -549,7 +549,7 @@ function usePlayerMemoItems(): PlayerMemo[] {
 
 export default function App() {
   const [meta, setMeta] = useState<MetaOptions | null>(null);
-  const [active, setActive] = useState<Workspace>("search");
+  const [active, setActive] = useState<Workspace>("db");
   const [error, setError] = useState<string | null>(null);
   const [riotIdHistory, setRiotIdHistory] =
     useState<string[]>(loadRiotIdHistory);
