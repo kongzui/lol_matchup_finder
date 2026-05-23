@@ -230,13 +230,13 @@ button {
 }
 
 .control-panel.multi {
-  grid-template-columns: minmax(260px, 1.4fr) minmax(280px, 1.6fr) minmax(
-      140px,
-      auto
-    );
+  grid-template-columns: minmax(260px, 1.25fr) minmax(180px, 0.8fr) minmax(
+      280px,
+      1.45fr
+    ) minmax(140px, auto);
   grid-template-areas:
-    "users options action"
-    "recent recent recent";
+    "users memo options action"
+    "recent recent recent recent";
 }
 
 .control-panel.search-panel {
@@ -420,6 +420,10 @@ button {
   grid-row: auto;
 }
 
+.multi > .memo-group-select-field {
+  grid-area: memo;
+}
+
 .db-panel .multi-riot-id-field {
   grid-area: users;
 }
@@ -430,6 +434,11 @@ button {
 
 .db-panel .enemy-filter-field {
   grid-area: enemy;
+}
+
+.memo-select-field select,
+.memo-group-select-field select {
+  color: #d7dee8;
 }
 
 .recent-searches {
@@ -1728,6 +1737,7 @@ button {
   .search-submit-action,
   .search-riot-history,
   .multi .multi-riot-id-field,
+  .multi > .memo-group-select-field,
   .multi-options,
   .multi-submit-action,
   .multi-riot-history,

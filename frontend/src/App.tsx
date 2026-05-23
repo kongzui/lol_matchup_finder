@@ -450,6 +450,31 @@ function useJobPoller(
   return { job, error, setError };
 }
 
+function usePlayerMemoItems(): PlayerMemo[] {
+  const [items, setItems] = useState<PlayerMemo[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .listPlayerMemos()
+      .then((payload) => {
+        if (!cancelled) {
+          setItems(payload.items);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setItems([]);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return items;
+}
+
 export default function App() {
   const [meta, setMeta] = useState<MetaOptions | null>(null);
   const [active, setActive] = useState<Workspace>("search");
@@ -712,6 +737,7 @@ function SearchWorkspace({
   });
   const [jobId, setJobId] = useState<string | null>(null);
   const [payload, setPayload] = useState<SearchPayload | null>(null);
+  const memoItems = usePlayerMemoItems();
 
   const poller = useJobPoller(jobId, async (status) => {
     const result = await api.getJobResult(status.jobId);
@@ -755,6 +781,18 @@ function SearchWorkspace({
     });
   };
 
+  const applyMemoItem = (item: PlayerMemo) => {
+    const nextValue = playerMemoName(item);
+    setBody({ ...body, riotIdRaw: nextValue });
+    window.requestAnimationFrame(() => {
+      riotIdInputRef.current?.focus();
+      riotIdInputRef.current?.setSelectionRange(
+        nextValue.length,
+        nextValue.length,
+      );
+    });
+  };
+
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     setPayload(null);
@@ -782,7 +820,7 @@ function SearchWorkspace({
       >
         <div className="riot-id-field">
           <label className="field">
-            <span>Riot ID</span>
+            <span>조회 유저</span>
             <input
               ref={riotIdInputRef}
               value={body.riotIdRaw}
@@ -792,6 +830,7 @@ function SearchWorkspace({
               placeholder="Hide on bush#KR1"
             />
           </label>
+          <MemoPlayerSelect items={memoItems} onPick={applyMemoItem} />
         </div>
         <div className="my-champion-field">
           <ChampionSelect
@@ -922,6 +961,8 @@ function MultiCollectWorkspace({
   });
   const [jobId, setJobId] = useState<string | null>(null);
   const [payload, setPayload] = useState<MultiSearchPayload | null>(null);
+  const memoItems = usePlayerMemoItems();
+  const memoGroups = useMemo(() => groupPlayerMemos(memoItems), [memoItems]);
 
   const poller = useJobPoller(jobId, async (status) => {
     const result = await api.getJobResult(status.jobId);
@@ -953,6 +994,18 @@ function MultiCollectWorkspace({
     });
   };
 
+  const applyMemoGroup = (items: PlayerMemo[]) => {
+    const nextValue = `${items.map(playerMemoName).join("\n")}\n`;
+    setBody({ ...body, riotIdsRaw: nextValue });
+    window.requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+      textareaRef.current?.setSelectionRange(
+        nextValue.length,
+        nextValue.length,
+      );
+    });
+  };
+
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     setPayload(null);
@@ -973,7 +1026,7 @@ function MultiCollectWorkspace({
       <form className="control-panel multi" onSubmit={submit}>
         <div className="multi-riot-id-field">
           <label className="field textarea-field">
-            <span>Riot ID 목록</span>
+            <span>조회 유저 목록</span>
             <textarea
               ref={textareaRef}
               value={body.riotIdsRaw}
@@ -984,6 +1037,7 @@ function MultiCollectWorkspace({
             />
           </label>
         </div>
+        <MemoGroupSelect groups={memoGroups} onPick={applyMemoGroup} />
         <div className="multi-options">
           <SelectField
             label="수집 기간"
@@ -1068,6 +1122,8 @@ function DbLookupWorkspace({
   });
   const [payload, setPayload] = useState<DbSearchPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const memoItems = usePlayerMemoItems();
+  const memoGroups = useMemo(() => groupPlayerMemos(memoItems), [memoItems]);
 
   const runSearch = async (nextBody = body) => {
     setError(null);
@@ -1125,6 +1181,18 @@ function DbLookupWorkspace({
     });
   };
 
+  const applyMemoGroup = (items: PlayerMemo[]) => {
+    const nextValue = `${items.map(playerMemoName).join("\n")}\n`;
+    setBody({ ...body, riotIdsRaw: nextValue });
+    window.requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+      textareaRef.current?.setSelectionRange(
+        nextValue.length,
+        nextValue.length,
+      );
+    });
+  };
+
   const submit = (event: FormEvent) => {
     event.preventDefault();
     const nextBody = {
@@ -1168,7 +1236,7 @@ function DbLookupWorkspace({
       >
         <div className="multi-riot-id-field">
           <label className="field textarea-field">
-            <span>조회 유저</span>
+            <span>조회 유저 목록</span>
             <textarea
               ref={textareaRef}
               value={body.riotIdsRaw}
@@ -1178,6 +1246,7 @@ function DbLookupWorkspace({
               placeholder={"비우면 메모 유저만\nHide on bush#KR1"}
             />
           </label>
+          <MemoGroupSelect groups={memoGroups} onPick={applyMemoGroup} />
         </div>
         <div className="my-champion-field">
           <ChampionSelect
@@ -1624,6 +1693,76 @@ function WorkspaceHeader({
       <h1>{title}</h1>
       <p>{description}</p>
     </header>
+  );
+}
+
+function MemoPlayerSelect({
+  items,
+  onPick,
+}: {
+  items: PlayerMemo[];
+  onPick: (item: PlayerMemo) => void;
+}) {
+  return (
+    <label className="field memo-select-field">
+      <span>메모된 유저</span>
+      <select
+        value=""
+        onChange={(event) => {
+          const item = items.find(
+            (candidate) => candidate.puuid === event.target.value,
+          );
+          if (item) {
+            onPick(item);
+          }
+        }}
+        disabled={items.length === 0}
+      >
+        <option value="">
+          {items.length ? "메모에서 선택" : "등록된 메모 없음"}
+        </option>
+        {items.map((item) => (
+          <option value={item.puuid} key={item.puuid}>
+            {item.memo} · {playerMemoName(item)}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function MemoGroupSelect({
+  groups,
+  onPick,
+}: {
+  groups: ReturnType<typeof groupPlayerMemos>;
+  onPick: (items: PlayerMemo[]) => void;
+}) {
+  return (
+    <label className="field memo-group-select-field">
+      <span>메모 선택</span>
+      <select
+        value=""
+        onChange={(event) => {
+          const group = groups.find(
+            (candidate) => candidate.memoText === event.target.value,
+          );
+          if (group) {
+            onPick(group.items);
+          }
+        }}
+        disabled={groups.length === 0}
+      >
+        <option value="">
+          {groups.length ? "메모에서 선택" : "등록된 메모 없음"}
+        </option>
+        {groups.map((group) => (
+          <option value={group.memoText} key={group.memoText}>
+            {group.memoText}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }
 
