@@ -174,6 +174,9 @@ class MatchCache:
                     player_primary_runes_json TEXT NOT NULL DEFAULT '[]',
                     player_secondary_tree_id INTEGER,
                     player_secondary_runes_json TEXT NOT NULL DEFAULT '[]',
+                    player_stat_offense INTEGER,
+                    player_stat_flex INTEGER,
+                    player_stat_defense INTEGER,
                     indexed_at INTEGER NOT NULL,
                     UNIQUE (match_id, player_puuid)
                 );
@@ -211,6 +214,19 @@ class MatchCache:
                     ADD COLUMN auto_refresh_enabled INTEGER NOT NULL DEFAULT 0
                     """
                 )
+            matchup_columns = {
+                row["name"]
+                for row in conn.execute("PRAGMA table_info(matchup_index)").fetchall()
+            }
+            for column in (
+                "player_stat_offense",
+                "player_stat_flex",
+                "player_stat_defense",
+            ):
+                if column not in matchup_columns:
+                    conn.execute(
+                        f"ALTER TABLE matchup_index ADD COLUMN {column} INTEGER"
+                    )
             conn.commit()
 
     @property
@@ -772,10 +788,11 @@ class MatchCache:
                         player_summoner1_id, player_summoner2_id,
                         player_items_json, player_primary_tree_id,
                         player_primary_runes_json, player_secondary_tree_id,
-                        player_secondary_runes_json, indexed_at
+                        player_secondary_runes_json, player_stat_offense,
+                        player_stat_flex, player_stat_defense, indexed_at
                     ) VALUES (
                         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                     )
                     ON CONFLICT(match_id, player_puuid) DO UPDATE SET
                         queue_id = excluded.queue_id,
@@ -807,6 +824,9 @@ class MatchCache:
                         player_primary_runes_json = excluded.player_primary_runes_json,
                         player_secondary_tree_id = excluded.player_secondary_tree_id,
                         player_secondary_runes_json = excluded.player_secondary_runes_json,
+                        player_stat_offense = excluded.player_stat_offense,
+                        player_stat_flex = excluded.player_stat_flex,
+                        player_stat_defense = excluded.player_stat_defense,
                         indexed_at = excluded.indexed_at
                     """,
                     (
@@ -841,6 +861,9 @@ class MatchCache:
                         json.dumps(row["player_primary_runes"], ensure_ascii=False),
                         row["player_secondary_tree_id"],
                         json.dumps(row["player_secondary_runes"], ensure_ascii=False),
+                        row["player_stat_offense"],
+                        row["player_stat_flex"],
+                        row["player_stat_defense"],
                         now,
                     ),
                 )
@@ -1005,11 +1028,15 @@ def _rune_fields(participant: dict[str, Any]) -> dict[str, Any]:
     styles = perks.get("styles") or []
     primary = styles[0] if len(styles) > 0 else {}
     secondary = styles[1] if len(styles) > 1 else {}
+    stat_perks = perks.get("statPerks") or {}
     return {
         "primary_tree_id": primary.get("style"),
         "primary_runes": _selection_ids(primary),
         "secondary_tree_id": secondary.get("style"),
         "secondary_runes": _selection_ids(secondary),
+        "stat_offense": stat_perks.get("offense"),
+        "stat_flex": stat_perks.get("flex"),
+        "stat_defense": stat_perks.get("defense"),
     }
 
 
@@ -1089,6 +1116,9 @@ def _build_matchup_index_rows(match: dict[str, Any]) -> list[dict[str, Any]]:
                 "player_primary_runes": runes["primary_runes"],
                 "player_secondary_tree_id": runes["secondary_tree_id"],
                 "player_secondary_runes": runes["secondary_runes"],
+                "player_stat_offense": runes["stat_offense"],
+                "player_stat_flex": runes["stat_flex"],
+                "player_stat_defense": runes["stat_defense"],
             }
         )
 
@@ -1216,6 +1246,9 @@ def _indexed_row_to_result(row: dict[str, Any]) -> dict[str, Any]:
         "my_primary_runes": _loads_json_list(row.get("player_primary_runes_json")),
         "my_secondary_tree_id": row.get("player_secondary_tree_id"),
         "my_secondary_runes": _loads_json_list(row.get("player_secondary_runes_json")),
+        "my_stat_offense": row.get("player_stat_offense"),
+        "my_stat_flex": row.get("player_stat_flex"),
+        "my_stat_defense": row.get("player_stat_defense"),
     }
 
 

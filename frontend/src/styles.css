@@ -1073,7 +1073,9 @@ button {
 
 .card-grid {
   display: grid;
-  grid-template-columns: 120px minmax(260px, 1.4fr) minmax(220px, 1fr) auto;
+  grid-template-columns:
+    120px minmax(240px, 1fr) minmax(186px, 0.7fr) minmax(220px, 1fr)
+    auto;
   gap: 12px;
   align-items: center;
   padding: 12px;
@@ -1234,6 +1236,57 @@ button {
   height: 28px;
   border-radius: 5px;
   background: #10141d;
+}
+
+.quick-build {
+  display: flex;
+  min-height: 48px;
+  align-items: center;
+  min-width: 0;
+  transform: translateX(-56px);
+}
+
+.quick-runes {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 220px;
+}
+
+.quick-rune-group,
+.quick-shard-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.quick-rune-pages {
+  display: grid;
+  gap: 5px;
+}
+
+.quick-rune-group.primary {
+  min-width: 107px;
+}
+
+.quick-rune-divider {
+  display: block;
+  flex: 0 0 2px;
+  height: 50px;
+  background: #596579;
+  border-radius: 999px;
+}
+
+.quick-runes img,
+.quick-shard-row span {
+  width: 23px;
+  height: 23px;
+  border-radius: 50%;
+  background: #10141d;
+}
+
+.quick-runes .stat-shard {
+  border-radius: 5px;
 }
 
 .enemy-summary {
@@ -1782,6 +1835,10 @@ button {
   .card-grid,
   .rune-pages {
     grid-template-columns: 1fr;
+  }
+
+  .quick-build {
+    transform: none;
   }
 
   .team-table-head {

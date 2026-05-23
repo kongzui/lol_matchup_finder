@@ -2565,6 +2565,7 @@ function MatchResultCard({
             )}
         </div>
       </div>
+      <MatchQuickBuild row={row} />
       <div className="enemy-summary">
         <img
           src={championIcon(meta.dataDragonVersion, row.enemy_champion_key)}
@@ -2595,6 +2596,62 @@ function MatchResultCard({
         <button className="icon-button" onClick={onToggle} title="매치 상세">
           {detailOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
         </button>
+      </div>
+    </div>
+  );
+}
+
+function MatchQuickBuild({ row }: { row: MatchRow }) {
+  const primaryRuneIcons = (row.myPrimaryRuneIconUrls || []).filter(Boolean);
+  const secondaryRuneIcons = (row.mySecondaryRuneIconUrls || []).filter(
+    Boolean,
+  );
+  const statShardIcons = (row.myStatShardIconUrls || []).map((url, index) => ({
+    url,
+    title: row.myStatShardNames?.[index] || "능력치 파편",
+  }));
+
+  return (
+    <div className="quick-build">
+      <div className="quick-runes">
+        <div className="quick-rune-pages">
+          <div className="quick-rune-group primary">
+            {primaryRuneIcons.map((url, index) => (
+              <img
+                key={`${url}-${index}`}
+                src={url || ""}
+                alt=""
+                title="주 룬"
+              />
+            ))}
+          </div>
+          <div className="quick-rune-group">
+            {secondaryRuneIcons.map((url, index) => (
+              <img
+                key={`${url}-${index}`}
+                src={url || ""}
+                alt=""
+                title="부 룬"
+              />
+            ))}
+          </div>
+        </div>
+        <span className="quick-rune-divider" />
+        <div className="quick-shard-row">
+          {statShardIcons.map(({ url, title }, index) =>
+            url ? (
+              <img
+                className="stat-shard"
+                key={`${url}-${index}`}
+                src={url}
+                alt=""
+                title={title}
+              />
+            ) : (
+              <span className="stat-shard" key={`stat-empty-${index}`} />
+            ),
+          )}
+        </div>
       </div>
     </div>
   );
@@ -2656,13 +2713,13 @@ function MatchDetailPanel({
 }) {
   const [detail, setDetail] = useState<MatchDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<DetailTab>("summary");
+  const [activeTab, setActiveTab] = useState<DetailTab>("build");
 
   useEffect(() => {
     let cancelled = false;
     setDetail(null);
     setError(null);
-    setActiveTab("summary");
+    setActiveTab("build");
     api
       .getMatchDetail(matchId, playerPuuid)
       .then((value) => {

@@ -207,4 +207,7 @@ def extract_matchup_result(
         "my_primary_runes": me_detail["primary_runes"],
         "my_secondary_tree_id": me_detail["secondary_tree_id"],
         "my_secondary_runes": me_detail["secondary_runes"],
+        "my_stat_offense": me_detail["stat_offense"],
+        "my_stat_flex": me_detail["stat_flex"],
+        "my_stat_defense": me_detail["stat_defense"],
     }

@@ -642,9 +642,42 @@ def _payload_dict(payload: Any) -> dict[str, Any]:
     )
 
 
+def _result_stat_shard_ids(row: dict[str, Any]) -> list[int | None]:
+    shard_ids = [
+        row.get("my_stat_offense"),
+        row.get("my_stat_flex"),
+        row.get("my_stat_defense"),
+    ]
+    if any(shard_id is not None for shard_id in shard_ids):
+        return shard_ids
+
+    match_id = row.get("match_id")
+    player_puuid = row.get("player_puuid")
+    if not match_id or not player_puuid:
+        return shard_ids
+
+    match = _get_cache().get_match(match_id)
+    info = (match or {}).get("info") or {}
+    participant = next(
+        (
+            player
+            for player in info.get("participants") or []
+            if player.get("puuid") == player_puuid
+        ),
+        None,
+    )
+    stat_perks = ((participant or {}).get("perks") or {}).get("statPerks") or {}
+    return [
+        stat_perks.get("offense"),
+        stat_perks.get("flex"),
+        stat_perks.get("defense"),
+    ]
+
+
 def _result_row_with_assets(row: dict[str, Any]) -> dict[str, Any]:
     static_data = _get_static_data()
     enriched = dict(row)
+    stat_shard_ids = _result_stat_shard_ids(row)
     enriched["mySummoner1IconUrl"] = static_data.summoner_icon_url(
         row.get("my_summoner1_id")
     )
@@ -664,6 +697,12 @@ def _result_row_with_assets(row: dict[str, Any]) -> dict[str, Any]:
     enriched["mySecondaryRuneIconUrls"] = [
         static_data.rune_icon_url(rune_id)
         for rune_id in row.get("my_secondary_runes", [])
+    ]
+    enriched["myStatShardIconUrls"] = [
+        stat_shard_icon_url(shard_id) for shard_id in stat_shard_ids
+    ]
+    enriched["myStatShardNames"] = [
+        stat_shard_name(shard_id) for shard_id in stat_shard_ids
     ]
     return enriched
 

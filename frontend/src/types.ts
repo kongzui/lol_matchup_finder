@@ -114,6 +114,8 @@ export interface MatchRow {
   mySecondaryTreeIconUrl?: string | null;
   myPrimaryRuneIconUrls?: Array<string | null>;
   mySecondaryRuneIconUrls?: Array<string | null>;
+  myStatShardIconUrls?: Array<string | null>;
+  myStatShardNames?: string[];
 }
 
 export interface SearchPayload {
