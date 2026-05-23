@@ -72,6 +72,14 @@ export const api = {
         body: JSON.stringify({ memo }),
       },
     ),
+  updatePlayerMemoAutoRefresh: (puuid: string, enabled: boolean) =>
+    requestJson<{ ok: boolean }>(
+      `/api/player-memos/${encodeURIComponent(puuid)}/auto-refresh`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ enabled }),
+      },
+    ),
   deletePlayerMemo: (puuid: string) =>
     requestJson<{ ok: boolean }>(
       `/api/player-memos/${encodeURIComponent(puuid)}`,

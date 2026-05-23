@@ -155,6 +155,40 @@ button {
   overflow-wrap: anywhere;
 }
 
+.server-auto-refresh {
+  display: grid;
+  gap: 4px;
+  padding-top: 8px;
+  border-top: 1px solid #303846;
+}
+
+.server-auto-refresh p {
+  display: grid;
+  gap: 2px;
+}
+
+.server-auto-refresh strong {
+  color: #f4f7fb;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+}
+
+.server-auto-refresh em {
+  color: #aab4c3;
+  font-size: 12px;
+  font-style: normal;
+}
+
+.server-auto-refresh.running strong {
+  color: #21d19f;
+}
+
+.server-auto-refresh.failed strong,
+.server-auto-refresh.stale strong {
+  color: #ffb8c0;
+}
+
 .data-dragon-row {
   display: flex;
   align-items: center;
@@ -818,6 +852,26 @@ button {
 .memo-actions {
   display: inline-flex;
   gap: 6px;
+  align-items: center;
+}
+
+.memo-auto-refresh {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #aab4c3;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.memo-auto-refresh input {
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  accent-color: #21d19f;
 }
 
 .memo-suggestion {

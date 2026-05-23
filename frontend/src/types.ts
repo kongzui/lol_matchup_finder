@@ -27,6 +27,21 @@ export interface MetaOptions {
   latestSearchRiotId: string | null;
   dbMatchCount: number;
   dbLastMatchCreation: number | null;
+  autoRefresh: {
+    status:
+      | "not_checked"
+      | "checking"
+      | "skipped"
+      | "running"
+      | "succeeded"
+      | "failed"
+      | "stale";
+    message: string;
+    jobId: string | null;
+    targetCount: number;
+    days: number | null;
+    matchesPerPlayer: number | null;
+  };
 }
 
 export interface SearchBody {
@@ -172,6 +187,7 @@ export interface MemoTarget {
 export interface PlayerMemo {
   puuid: string;
   memo: string;
+  auto_refresh_enabled: boolean;
   updated_at: number;
   riot_id_game_name?: string | null;
   riot_id_tag_line?: string | null;

@@ -137,6 +137,7 @@ class MatchCache:
                 CREATE TABLE IF NOT EXISTS player_memo (
                     puuid TEXT PRIMARY KEY,
                     memo TEXT NOT NULL,
+                    auto_refresh_enabled INTEGER NOT NULL DEFAULT 0,
                     updated_at INTEGER NOT NULL
                 );
 
@@ -199,6 +200,17 @@ class MatchCache:
                 );
                 """
             )
+            columns = {
+                row["name"]
+                for row in conn.execute("PRAGMA table_info(player_memo)").fetchall()
+            }
+            if "auto_refresh_enabled" not in columns:
+                conn.execute(
+                    """
+                    ALTER TABLE player_memo
+                    ADD COLUMN auto_refresh_enabled INTEGER NOT NULL DEFAULT 0
+                    """
+                )
             conn.commit()
 
     @property
@@ -455,6 +467,7 @@ class MatchCache:
                 SELECT
                     pm.puuid,
                     pm.memo,
+                    pm.auto_refresh_enabled,
                     pm.updated_at,
                     pr.riot_id_game_name,
                     pr.riot_id_tag_line,
@@ -468,6 +481,32 @@ class MatchCache:
                     FROM matchup_index
                     GROUP BY player_puuid
                 ) mi ON mi.player_puuid = pm.puuid
+                ORDER BY pm.updated_at DESC
+                """
+            ).fetchall()
+        return [
+            {
+                **dict(row),
+                "auto_refresh_enabled": bool(row["auto_refresh_enabled"]),
+            }
+            for row in rows
+        ]
+
+    def list_auto_refresh_player_memos(self) -> list[dict[str, Any]]:
+        """자동갱신이 켜진 메모 유저 중 Riot ID가 있는 유저를 반환한다."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    pm.puuid,
+                    pm.memo,
+                    pr.riot_id_game_name,
+                    pr.riot_id_tag_line
+                FROM player_memo pm
+                JOIN player_registry pr ON pr.puuid = pm.puuid
+                WHERE pm.auto_refresh_enabled = 1
+                  AND pr.riot_id_game_name IS NOT NULL
+                  AND pr.riot_id_tag_line IS NOT NULL
                 ORDER BY pm.updated_at DESC
                 """
             ).fetchall()
@@ -550,6 +589,19 @@ class MatchCache:
             conn.execute(
                 "DELETE FROM player_memo WHERE puuid = ?",
                 (puuid,),
+            )
+            conn.commit()
+
+    def set_player_memo_auto_refresh(self, puuid: str, enabled: bool) -> None:
+        """관심 유저의 자동갱신 여부를 저장한다."""
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE player_memo
+                SET auto_refresh_enabled = ?
+                WHERE puuid = ?
+                """,
+                (1 if enabled else 0, puuid),
             )
             conn.commit()
 

@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import threading
+import time
 import uuid
 from dataclasses import asdict, dataclass
 from datetime import date, timedelta
+from math import ceil
 from typing import Any, Callable, Literal
 
 from fastapi import FastAPI, HTTPException, Query
@@ -118,6 +120,12 @@ class PlayerMemoBody(BaseModel):
     memo: str
 
 
+class PlayerMemoAutoRefreshBody(BaseModel):
+    """관심 유저 자동갱신 설정 요청."""
+
+    enabled: bool
+
+
 class ResolveRiotIdBody(BaseModel):
     """Riot ID를 PUUID로 변환하는 요청."""
 
@@ -194,6 +202,21 @@ _champion_data: ChampionData | None = None
 _static_data: StaticData | None = None
 _data_dragon_checked = False
 _resource_lock = threading.Lock()
+_auto_refresh_lock = threading.Lock()
+_auto_refresh_checked = False
+_auto_refresh_status: dict[str, Any] = {
+    "status": "not_checked",
+    "message": "자동갱신을 아직 확인하지 않았습니다.",
+    "jobId": None,
+    "targetCount": 0,
+    "days": None,
+    "matchesPerPlayer": None,
+}
+
+AUTO_REFRESH_SKIP_DAYS = 2
+AUTO_REFRESH_MAX_DAYS = 60
+AUTO_REFRESH_MATCHES_PER_DAY = 5
+AUTO_REFRESH_MAX_MATCHES_PER_PLAYER = 300
 
 
 def _get_config() -> AppConfig:
@@ -440,6 +463,165 @@ def _db_request(
         target_puuids=target_puuids,
         resolve_cache_hits=cache_hits,
         resolve_api_calls=api_calls,
+    )
+
+
+def _create_multi_search_job(
+    *,
+    request: MultiSearchRequest,
+    kind: str = "multi-search",
+    success_message: str = "수집 완료",
+) -> JobRecord:
+    """멀티서치 job을 생성한다."""
+
+    def runner(job: JobRecord) -> None:
+        def progress_cb(value: float) -> None:
+            _jobs.update(job.job_id, progress=min(max(value, 0.0), 1.0))
+
+        def status_cb(message: str) -> None:
+            _jobs.update(job.job_id, message=message)
+
+        result = run_multi_search(
+            config=_get_config(),
+            request=request,
+            cache=_get_cache(),
+            progress_cb=progress_cb,
+            status_cb=status_cb,
+        )
+        _jobs.update(
+            job.job_id,
+            status="succeeded",
+            progress=1.0,
+            message=success_message,
+            result=result,
+        )
+
+    return _jobs.create(kind, runner)
+
+
+def _set_auto_refresh_status(**changes: Any) -> None:
+    with _auto_refresh_lock:
+        _auto_refresh_status.update(changes)
+
+
+def _auto_refresh_payload() -> dict[str, Any]:
+    with _auto_refresh_lock:
+        status = dict(_auto_refresh_status)
+
+    job_id = status.get("jobId")
+    if job_id:
+        job = _jobs.get(job_id)
+        if job is not None:
+            if job.status == "running" or job.status == "queued":
+                status["status"] = "running"
+                status["message"] = job.message or status["message"]
+            elif job.status == "succeeded":
+                status["status"] = "succeeded"
+                status["message"] = job.message or "자동갱신 완료"
+            elif job.status == "failed":
+                status["status"] = "failed"
+                status["message"] = job.error or "자동갱신 실패"
+
+    return status
+
+
+def _auto_refresh_message_for_stale(days: int) -> str:
+    months = max(days // 30, 2)
+    return f"마지막 갱신이 {months}달 전입니다. 갱신이 필요합니다."
+
+
+def _maybe_start_auto_refresh() -> None:
+    """서버 프로세스 기준 1회만 메모 유저 자동갱신을 시작한다."""
+    global _auto_refresh_checked
+
+    with _auto_refresh_lock:
+        if _auto_refresh_checked:
+            return
+        _auto_refresh_checked = True
+        _auto_refresh_status.update(
+            {
+                "status": "checking",
+                "message": "자동갱신 조건을 확인 중입니다.",
+                "jobId": None,
+                "targetCount": 0,
+                "days": None,
+                "matchesPerPlayer": None,
+            }
+        )
+
+    cache = _get_cache()
+    stats = cache.get_match_cache_stats()
+    last_match_creation = stats["last_match_creation"]
+    if not last_match_creation:
+        _set_auto_refresh_status(
+            status="skipped",
+            message="DB에 저장된 매치가 없어 자동갱신을 건너뜁니다.",
+        )
+        return
+
+    days = max(ceil((time.time() * 1000 - last_match_creation) / 86_400_000), 0)
+    if days <= AUTO_REFRESH_SKIP_DAYS:
+        _set_auto_refresh_status(
+            status="skipped",
+            message=(
+                f"마지막 매치가 {AUTO_REFRESH_SKIP_DAYS}일 이내라\n"
+                "자동갱신을 건너뜁니다."
+            ),
+            days=days,
+        )
+        return
+
+    if days > AUTO_REFRESH_MAX_DAYS:
+        _set_auto_refresh_status(
+            status="stale",
+            message=_auto_refresh_message_for_stale(days),
+            days=days,
+        )
+        return
+
+    if not _get_config().api_key:
+        _set_auto_refresh_status(
+            status="skipped",
+            message="RIOT_API_KEY가 없어 자동갱신을 건너뜁니다.",
+            days=days,
+        )
+        return
+
+    targets = cache.list_auto_refresh_player_memos()
+    if not targets:
+        _set_auto_refresh_status(
+            status="skipped",
+            message="자동갱신이 켜진 메모 유저가 없습니다.",
+            days=days,
+            targetCount=0,
+        )
+        return
+
+    matches_per_player = min(
+        days * AUTO_REFRESH_MATCHES_PER_DAY,
+        AUTO_REFRESH_MAX_MATCHES_PER_PLAYER,
+    )
+    riot_ids = [
+        f"{target['riot_id_game_name']}#{target['riot_id_tag_line']}"
+        for target in targets
+    ]
+    request = MultiSearchRequest(
+        riot_ids_raw=", ".join(riot_ids),
+        days=days,
+        matches_per_player=matches_per_player,
+    )
+    job = _create_multi_search_job(
+        request=request,
+        kind="auto-refresh",
+        success_message="자동갱신 완료",
+    )
+    _set_auto_refresh_status(
+        status="running",
+        message="자동갱신 중입니다.",
+        jobId=job.job_id,
+        targetCount=len(targets),
+        days=days,
+        matchesPerPlayer=matches_per_player,
     )
 
 
@@ -762,6 +944,7 @@ def _build_meta_options() -> dict[str, Any]:
         "latestSearchRiotId": cache.get_latest_search_riot_id(),
         "dbMatchCount": match_cache_stats["match_count"],
         "dbLastMatchCreation": match_cache_stats["last_match_creation"],
+        "autoRefresh": _auto_refresh_payload(),
     }
 
 
@@ -769,6 +952,7 @@ def _build_meta_options() -> dict[str, Any]:
 def get_options() -> dict[str, Any]:
     """프론트 초기 렌더링에 필요한 옵션을 반환한다."""
     _ensure_data_dragon_checked()
+    _maybe_start_auto_refresh()
     return _build_meta_options()
 
 
@@ -819,30 +1003,7 @@ def create_multi_search_job(body: MultiSearchJobBody) -> dict[str, str]:
         days=body.days,
         matches_per_player=body.matches_per_player,
     )
-
-    def runner(job: JobRecord) -> None:
-        def progress_cb(value: float) -> None:
-            _jobs.update(job.job_id, progress=min(max(value, 0.0), 1.0))
-
-        def status_cb(message: str) -> None:
-            _jobs.update(job.job_id, message=message)
-
-        result = run_multi_search(
-            config=_get_config(),
-            request=request,
-            cache=_get_cache(),
-            progress_cb=progress_cb,
-            status_cb=status_cb,
-        )
-        _jobs.update(
-            job.job_id,
-            status="succeeded",
-            progress=1.0,
-            message="수집 완료",
-            result=result,
-        )
-
-    job = _jobs.create("multi-search", runner)
+    job = _create_multi_search_job(request=request)
     return {"jobId": job.job_id}
 
 
@@ -901,6 +1062,16 @@ def resolve_player_memo_riot_id(body: ResolveRiotIdBody) -> dict[str, Any]:
 def upsert_player_memo(puuid: str, body: PlayerMemoBody) -> dict[str, bool]:
     """관심 유저 메모를 저장한다."""
     _get_cache().upsert_player_memo(puuid, body.memo)
+    return {"ok": True}
+
+
+@app.patch("/api/player-memos/{puuid}/auto-refresh")
+def update_player_memo_auto_refresh(
+    puuid: str,
+    body: PlayerMemoAutoRefreshBody,
+) -> dict[str, bool]:
+    """관심 유저 자동갱신 여부를 저장한다."""
+    _get_cache().set_player_memo_auto_refresh(puuid, body.enabled)
     return {"ok": True}
 
 

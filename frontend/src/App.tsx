@@ -150,6 +150,14 @@ function dbLastMatchText(timestamp?: number | null): string {
   }).format(new Date(timestamp));
 }
 
+function autoRefreshSummary(meta: MetaOptions): string {
+  const refresh = meta.autoRefresh;
+  if (refresh.status === "running" && refresh.targetCount) {
+    return `자동갱신 중 · ${refresh.targetCount}명`;
+  }
+  return refresh.message;
+}
+
 function matchPatchVersion(row: MatchRow): string | null {
   const version = row.game_version?.trim();
   if (!version) {
@@ -599,6 +607,12 @@ export default function App() {
     });
   }, [meta]);
 
+  const autoRefreshJobId =
+    meta?.autoRefresh.status === "running" ? meta.autoRefresh.jobId : null;
+  const autoRefreshPoller = useJobPoller(autoRefreshJobId, async () => {
+    setMeta(await api.getMeta());
+  });
+
   const refreshMeta = async () => {
     setMetaRefreshing(true);
     setMetaRefreshError(null);
@@ -680,6 +694,28 @@ export default function App() {
               <span>마지막 매치</span>
               <strong>{dbLastMatchText(meta.dbLastMatchCreation)}</strong>
             </p>
+          </div>
+          <div className={`server-auto-refresh ${meta.autoRefresh.status}`}>
+            <p>
+              <span>자동갱신</span>
+              <strong>{autoRefreshSummary(meta)}</strong>
+            </p>
+            {meta.autoRefresh.days !== null &&
+              meta.autoRefresh.matchesPerPlayer !== null && (
+                <em>
+                  최근 {meta.autoRefresh.days}일 · 1인당{" "}
+                  {meta.autoRefresh.matchesPerPlayer}판
+                </em>
+              )}
+            {autoRefreshPoller.job && meta.autoRefresh.status === "running" && (
+              <em>
+                {Math.round(autoRefreshPoller.job.progress * 100)}% ·{" "}
+                {autoRefreshPoller.job.message || "진행 중"}
+              </em>
+            )}
+            {autoRefreshPoller.error && (
+              <em className="server-error-text">{autoRefreshPoller.error}</em>
+            )}
           </div>
           <div className="data-dragon-row">
             <p>Data Dragon {meta.dataDragonVersion}</p>
@@ -1511,6 +1547,19 @@ function PlayerMemoWorkspace() {
     }
   };
 
+  const saveAutoRefresh = async (item: PlayerMemo, enabled: boolean) => {
+    setSaving(true);
+    setError(null);
+    try {
+      await api.updatePlayerMemoAutoRefresh(item.puuid, enabled);
+      await loadMemos();
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : "자동갱신 설정 실패");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const startEditing = (item: PlayerMemo) => {
     setEditing({ ...editing, [item.puuid]: editing[item.puuid] ?? item.memo });
     setEditingPuuid(item.puuid);
@@ -1642,6 +1691,17 @@ function PlayerMemoWorkspace() {
                             <span>수정 {memoDate(item.updated_at)}</span>
                           </div>
                           <div className="memo-actions">
+                            <label className="memo-auto-refresh">
+                              <input
+                                type="checkbox"
+                                checked={item.auto_refresh_enabled}
+                                onChange={(event) =>
+                                  saveAutoRefresh(item, event.target.checked)
+                                }
+                                disabled={saving}
+                              />
+                              자동갱신
+                            </label>
                             {isEditing ? (
                               <>
                                 <button
