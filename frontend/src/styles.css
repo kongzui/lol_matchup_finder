@@ -249,6 +249,7 @@ button {
 }
 
 .riot-id-field,
+.enemy-filter-field,
 .multi-riot-id-field {
   display: grid;
   gap: 10px;
@@ -257,6 +258,16 @@ button {
 
 .riot-id-field {
   grid-column: span 2;
+}
+
+.enemy-filter-field {
+  grid-column: span 3;
+}
+
+.enemy-filter-controls {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
 }
 
 .multi-riot-id-field {
@@ -1225,8 +1236,13 @@ button {
   }
 
   .field.wide,
-  .riot-id-field {
+  .riot-id-field,
+  .enemy-filter-field {
     grid-column: auto;
+  }
+
+  .enemy-filter-controls {
+    grid-template-columns: 1fr;
   }
 
   .kpis {

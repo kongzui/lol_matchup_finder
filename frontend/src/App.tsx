@@ -40,6 +40,8 @@ const RIOT_ID_HISTORY_KEY = "lol-matchup-finder:riot-id-history";
 const LEGACY_MULTI_SEARCH_HISTORY_KEY =
   "lol-matchup-finder:multi-search-history";
 const RIOT_ID_HISTORY_LIMIT = 20;
+const ENEMY_CHAMPION_HISTORY_KEY = "lol-matchup-finder:enemy-champion-history";
+const ENEMY_CHAMPION_HISTORY_LIMIT = 20;
 const LANE_ORDER: Record<string, number> = {
   TOP: 0,
   JUNGLE: 1,
@@ -156,6 +158,57 @@ function saveRiotIdHistory(history: string[]): void {
   }
 }
 
+function compactEnemyChampionHistory(
+  values: string[],
+  meta?: MetaOptions,
+): string[] {
+  const championNames = meta
+    ? new Set(meta.champions.map((champion) => champion.koreanName))
+    : null;
+  const seen = new Set<string>();
+  const compacted: string[] = [];
+  for (const value of values) {
+    const champion = value.trim();
+    if (!champion || seen.has(champion)) {
+      continue;
+    }
+    if (championNames && !championNames.has(champion)) {
+      continue;
+    }
+    seen.add(champion);
+    compacted.push(champion);
+    if (compacted.length >= ENEMY_CHAMPION_HISTORY_LIMIT) {
+      break;
+    }
+  }
+  return compacted;
+}
+
+function loadEnemyChampionHistory(): string[] {
+  try {
+    const raw = window.localStorage.getItem(ENEMY_CHAMPION_HISTORY_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed)
+      ? compactEnemyChampionHistory(
+          parsed.filter((item) => typeof item === "string"),
+        )
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveEnemyChampionHistory(history: string[]): void {
+  try {
+    window.localStorage.setItem(
+      ENEMY_CHAMPION_HISTORY_KEY,
+      JSON.stringify(history),
+    );
+  } catch {
+    return;
+  }
+}
+
 function riotId(name?: string, tag?: string, fallback?: string): string {
   if (name && tag) {
     return `${name}#${tag}`;
@@ -227,6 +280,9 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [riotIdHistory, setRiotIdHistory] =
     useState<string[]>(loadRiotIdHistory);
+  const [enemyChampionHistory, setEnemyChampionHistory] = useState<string[]>(
+    loadEnemyChampionHistory,
+  );
 
   useEffect(() => {
     api
@@ -250,6 +306,17 @@ export default function App() {
       return next;
     });
   }, [meta?.latestSearchRiotId]);
+
+  useEffect(() => {
+    if (!meta) {
+      return;
+    }
+    setEnemyChampionHistory((prev) => {
+      const next = compactEnemyChampionHistory(prev, meta);
+      saveEnemyChampionHistory(next);
+      return next;
+    });
+  }, [meta]);
 
   if (error) {
     return <FatalError message={error} />;
@@ -307,6 +374,8 @@ export default function App() {
             meta={meta}
             riotIdHistory={riotIdHistory}
             setRiotIdHistory={setRiotIdHistory}
+            enemyChampionHistory={enemyChampionHistory}
+            setEnemyChampionHistory={setEnemyChampionHistory}
           />
         )}
         {active === "multi" && (
@@ -316,7 +385,13 @@ export default function App() {
             setRiotIdHistory={setRiotIdHistory}
           />
         )}
-        {active === "db" && <DbLookupWorkspace meta={meta} />}
+        {active === "db" && (
+          <DbLookupWorkspace
+            meta={meta}
+            enemyChampionHistory={enemyChampionHistory}
+            setEnemyChampionHistory={setEnemyChampionHistory}
+          />
+        )}
       </main>
     </div>
   );
@@ -357,10 +432,14 @@ function SearchWorkspace({
   meta,
   riotIdHistory,
   setRiotIdHistory,
+  enemyChampionHistory,
+  setEnemyChampionHistory,
 }: {
   meta: MetaOptions;
   riotIdHistory: string[];
   setRiotIdHistory: Dispatch<SetStateAction<string[]>>;
+  enemyChampionHistory: string[];
+  setEnemyChampionHistory: Dispatch<SetStateAction<string[]>>;
 }) {
   const riotIdInputRef = useRef<HTMLInputElement | null>(null);
   const [body, setBody] = useState<SearchBody>({
@@ -402,6 +481,14 @@ function SearchWorkspace({
     return normalized;
   };
 
+  const rememberEnemyChampionHistory = (enemyChampion: string) => {
+    setEnemyChampionHistory((prev) => {
+      const next = compactEnemyChampionHistory([enemyChampion, ...prev], meta);
+      saveEnemyChampionHistory(next);
+      return next;
+    });
+  };
+
   const applyHistoryItem = (riotId: string) => {
     setBody({ ...body, riotIdRaw: riotId });
     window.requestAnimationFrame(() => {
@@ -415,6 +502,7 @@ function SearchWorkspace({
     setPayload(null);
     poller.setError(null);
     const nextBody = { ...body, riotIdRaw: rememberHistory(body.riotIdRaw) };
+    rememberEnemyChampionHistory(nextBody.enemyChampionKorean);
     setBody(nextBody);
     const created = await api.createSearchJob(nextBody);
     setJobId(created.jobId);
@@ -451,24 +539,34 @@ function SearchWorkspace({
           meta={meta}
           onChange={(value) => setBody({ ...body, myChampionKorean: value })}
         />
-        <ChampionSelect
-          label="상대 챔피언"
-          value={body.enemyChampionKorean}
-          meta={meta}
-          onChange={(value) => setBody({ ...body, enemyChampionKorean: value })}
-        />
-        <SelectField
-          label="라인"
-          value={body.laneLabel}
-          options={meta.laneOptions}
-          onChange={(value) => setBody({ ...body, laneLabel: value })}
-        />
-        <SelectField
-          label="기간"
-          value={body.periodKind}
-          options={meta.periodOptions}
-          onChange={(value) => setBody({ ...body, periodKind: value })}
-        />
+        <div className="enemy-filter-field">
+          <div className="enemy-filter-controls">
+            <ChampionSelect
+              label="상대 챔피언"
+              value={body.enemyChampionKorean}
+              meta={meta}
+              onChange={(value) =>
+                setBody({ ...body, enemyChampionKorean: value })
+              }
+            />
+            <SelectField
+              label="라인"
+              value={body.laneLabel}
+              options={meta.laneOptions}
+              onChange={(value) => setBody({ ...body, laneLabel: value })}
+            />
+            <SelectField
+              label="기간"
+              value={body.periodKind}
+              options={meta.periodOptions}
+              onChange={(value) => setBody({ ...body, periodKind: value })}
+            />
+          </div>
+          <RecentEnemyChampionSearches
+            history={enemyChampionHistory}
+            onPick={(value) => setBody({ ...body, enemyChampionKorean: value })}
+          />
+        </div>
         <SelectField
           label="최대 매치"
           value={String(body.maxMatches)}
@@ -627,7 +725,15 @@ function MultiCollectWorkspace({
   );
 }
 
-function DbLookupWorkspace({ meta }: { meta: MetaOptions }) {
+function DbLookupWorkspace({
+  meta,
+  enemyChampionHistory,
+  setEnemyChampionHistory,
+}: {
+  meta: MetaOptions;
+  enemyChampionHistory: string[];
+  setEnemyChampionHistory: Dispatch<SetStateAction<string[]>>;
+}) {
   const [body, setBody] = useState<DbSearchBody>({
     myChampionKorean: meta.champions.find(
       (champ) => champ.koreanName === "아리",
@@ -655,9 +761,21 @@ function DbLookupWorkspace({ meta }: { meta: MetaOptions }) {
     }
   };
 
+  const rememberEnemyChampionHistory = (nextBody: DbSearchBody) => {
+    setEnemyChampionHistory((prev) => {
+      const next = compactEnemyChampionHistory(
+        [nextBody.enemyChampionKorean, ...prev],
+        meta,
+      );
+      saveEnemyChampionHistory(next);
+      return next;
+    });
+  };
+
   const submit = (event: FormEvent) => {
     event.preventDefault();
     const nextBody = { ...body, page: 1 };
+    rememberEnemyChampionHistory(nextBody);
     setBody(nextBody);
     runSearch(nextBody);
   };
@@ -691,27 +809,37 @@ function DbLookupWorkspace({ meta }: { meta: MetaOptions }) {
           meta={meta}
           onChange={(value) => setBody({ ...body, myChampionKorean: value })}
         />
-        <SelectField
-          label="상대 챔피언"
-          value={body.enemyChampionKorean}
-          options={[
-            meta.dbEnemyAllLabel,
-            ...meta.champions.map((champ) => champ.koreanName),
-          ]}
-          onChange={(value) => setBody({ ...body, enemyChampionKorean: value })}
-        />
-        <SelectField
-          label="라인"
-          value={body.laneLabel}
-          options={meta.laneOptions}
-          onChange={(value) => setBody({ ...body, laneLabel: value })}
-        />
-        <SelectField
-          label="기간"
-          value={body.periodKind}
-          options={meta.periodOptions}
-          onChange={(value) => setBody({ ...body, periodKind: value })}
-        />
+        <div className="enemy-filter-field">
+          <div className="enemy-filter-controls">
+            <SelectField
+              label="상대 챔피언"
+              value={body.enemyChampionKorean}
+              options={[
+                meta.dbEnemyAllLabel,
+                ...meta.champions.map((champ) => champ.koreanName),
+              ]}
+              onChange={(value) =>
+                setBody({ ...body, enemyChampionKorean: value })
+              }
+            />
+            <SelectField
+              label="라인"
+              value={body.laneLabel}
+              options={meta.laneOptions}
+              onChange={(value) => setBody({ ...body, laneLabel: value })}
+            />
+            <SelectField
+              label="기간"
+              value={body.periodKind}
+              options={meta.periodOptions}
+              onChange={(value) => setBody({ ...body, periodKind: value })}
+            />
+          </div>
+          <RecentEnemyChampionSearches
+            history={enemyChampionHistory}
+            onPick={(value) => setBody({ ...body, enemyChampionKorean: value })}
+          />
+        </div>
         {body.periodKind === meta.customPeriodLabel && (
           <>
             <DateField
@@ -814,6 +942,38 @@ function RecentRiotIdSearches({
       <span>
         <History size={14} />
         최근검색
+      </span>
+      <div>
+        {history.map((item) => (
+          <button
+            key={item}
+            type="button"
+            onClick={() => onPick(item)}
+            title={item}
+          >
+            {item}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function RecentEnemyChampionSearches({
+  history,
+  onPick,
+}: {
+  history: string[];
+  onPick: (champion: string) => void;
+}) {
+  if (history.length === 0) {
+    return null;
+  }
+  return (
+    <div className="recent-searches" aria-label="최근 상대 챔피언">
+      <span>
+        <History size={14} />
+        최근 상대 챔피언
       </span>
       <div>
         {history.map((item) => (
