@@ -82,7 +82,7 @@ def run_indexed_matchup_search(
     if request.my_champion_korean != DB_ALL_LABEL:
         my_champion_key = champion_data.to_english_key(request.my_champion_korean)
         if not my_champion_key:
-            raise RiotApiError("선택한 내 챔피언을 인식하지 못했습니다.")
+            raise RiotApiError("선택한 기준 챔피언을 인식하지 못했습니다.")
 
     enemy_champion_key = None
     if request.enemy_champion_korean != DB_ENEMY_ALL_LABEL:

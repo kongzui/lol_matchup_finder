@@ -944,7 +944,7 @@ function SearchWorkspace({
         </div>
         <div className="my-champion-field">
           <ChampionSelect
-            label="내 챔피언"
+            label="기준 챔피언"
             value={body.myChampionKorean}
             meta={meta}
             onChange={(value) => setBody({ ...body, myChampionKorean: value })}
@@ -1374,7 +1374,7 @@ function DbLookupWorkspace({
         </div>
         <div className="my-champion-field">
           <ChampionSelect
-            label="내 챔피언"
+            label="기준 챔피언"
             value={body.myChampionKorean}
             meta={meta}
             onChange={(value) => setBody({ ...body, myChampionKorean: value })}
@@ -1957,10 +1957,10 @@ function RecentHistoryWorkspace({
           }
         />
         <HistoryManagerSection
-          title="내 챔피언 최근검색"
+          title="기준 챔피언 최근검색"
           items={myChampionHistory}
           fixedItems={["전체"]}
-          emptyText="저장된 내 챔피언 최근검색이 없습니다."
+          emptyText="저장된 기준 챔피언 최근검색이 없습니다."
           onRemove={(value) =>
             removeStoredHistoryItem(
               value,
@@ -2117,11 +2117,11 @@ function RecentMyChampionSearches({
   return (
     <div
       className="recent-searches compact-history"
-      aria-label="최근 내 챔피언"
+      aria-label="최근 기준 챔피언"
     >
       <span>
         <History size={14} />
-        최근 내 챔피언
+        최근 기준 챔피언
       </span>
       <div>
         {items.map((item) => (
