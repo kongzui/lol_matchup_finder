@@ -175,6 +175,7 @@ export interface PlayerMemo {
   riot_id_tag_line?: string | null;
   summoner_name?: string | null;
   last_seen_at?: number | null;
+  game_count: number;
 }
 
 export interface ResolvePlayerMemoPayload {

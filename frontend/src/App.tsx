@@ -384,6 +384,10 @@ function groupPlayerMemos(items: PlayerMemo[]) {
           sensitivity: "base",
         }),
       ),
+      gameCount: groupItems.reduce(
+        (total, item) => total + (item.game_count || 0),
+        0,
+      ),
     }))
     .sort((left, right) =>
       left.memoText.localeCompare(right.memoText, "ko-KR", {
@@ -1520,7 +1524,10 @@ function PlayerMemoWorkspace() {
                 <div className="memo-group" key={group.memoText}>
                   <div className="memo-group-label">
                     <strong>{group.memoText}</strong>
-                    <span>{group.items.length}개</span>
+                    <span>
+                      닉네임 {group.items.length}개 · 전체 게임{" "}
+                      {group.gameCount.toLocaleString()}개
+                    </span>
                   </div>
                   <div className="memo-group-players">
                     {group.items.map((item) => {

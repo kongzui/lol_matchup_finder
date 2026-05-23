@@ -445,9 +445,15 @@ class MatchCache:
                     pr.riot_id_game_name,
                     pr.riot_id_tag_line,
                     pr.summoner_name,
-                    pr.last_seen_at
+                    pr.last_seen_at,
+                    COALESCE(mi.game_count, 0) AS game_count
                 FROM player_memo pm
                 LEFT JOIN player_registry pr ON pr.puuid = pm.puuid
+                LEFT JOIN (
+                    SELECT player_puuid, COUNT(*) AS game_count
+                    FROM matchup_index
+                    GROUP BY player_puuid
+                ) mi ON mi.player_puuid = pm.puuid
                 ORDER BY pm.updated_at DESC
                 """
             ).fetchall()
