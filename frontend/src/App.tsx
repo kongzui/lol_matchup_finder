@@ -8,6 +8,7 @@ import {
   Download,
   ExternalLink,
   History,
+  RefreshCw,
   Search,
   Server,
   UploadCloud,
@@ -283,6 +284,8 @@ export default function App() {
   const [enemyChampionHistory, setEnemyChampionHistory] = useState<string[]>(
     loadEnemyChampionHistory,
   );
+  const [metaRefreshing, setMetaRefreshing] = useState(false);
+  const [metaRefreshError, setMetaRefreshError] = useState<string | null>(null);
 
   useEffect(() => {
     api
@@ -317,6 +320,20 @@ export default function App() {
       return next;
     });
   }, [meta]);
+
+  const refreshMeta = async () => {
+    setMetaRefreshing(true);
+    setMetaRefreshError(null);
+    try {
+      setMeta(await api.refreshMeta());
+    } catch (exc) {
+      setMetaRefreshError(
+        exc instanceof Error ? exc.message : "Data Dragon 갱신 실패",
+      );
+    } finally {
+      setMetaRefreshing(false);
+    }
+  };
 
   if (error) {
     return <FatalError message={error} />;
@@ -364,7 +381,22 @@ export default function App() {
           <p>
             {meta.region} · {meta.platform} · queue {meta.queueId}
           </p>
-          <p>Data Dragon {meta.dataDragonVersion}</p>
+          <div className="data-dragon-row">
+            <p>Data Dragon {meta.dataDragonVersion}</p>
+            <button
+              className="icon-button compact"
+              type="button"
+              onClick={refreshMeta}
+              disabled={metaRefreshing}
+              title="Data Dragon 갱신"
+              aria-label="Data Dragon 갱신"
+            >
+              <RefreshCw className={metaRefreshing ? "spin" : ""} size={14} />
+            </button>
+          </div>
+          {metaRefreshError && (
+            <p className="server-error-text">{metaRefreshError}</p>
+          )}
         </div>
       </aside>
 

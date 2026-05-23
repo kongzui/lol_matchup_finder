@@ -172,6 +172,7 @@ _config: AppConfig | None = None
 _cache: MatchCache | None = None
 _champion_data: ChampionData | None = None
 _static_data: StaticData | None = None
+_data_dragon_checked = False
 _resource_lock = threading.Lock()
 
 
@@ -205,6 +206,34 @@ def _get_static_data() -> StaticData:
             if _static_data is None:
                 _static_data = StaticDataRepository(_get_config().db_path).load()
     return _static_data
+
+
+def _refresh_data_dragon_resources(
+    *,
+    force_refresh: bool,
+    check_latest: bool,
+) -> tuple[ChampionData, StaticData]:
+    global _champion_data, _static_data, _data_dragon_checked
+    with _resource_lock:
+        config = _get_config()
+        champion_data = ChampionRepository(config.db_path).load(
+            force_refresh=force_refresh,
+            check_latest=check_latest,
+        )
+        static_data = StaticDataRepository(config.db_path).load(
+            force_refresh=force_refresh,
+            check_latest=check_latest,
+        )
+        _champion_data = champion_data
+        _static_data = static_data
+        _data_dragon_checked = True
+    return champion_data, static_data
+
+
+def _ensure_data_dragon_checked() -> None:
+    if _data_dragon_checked:
+        return
+    _refresh_data_dragon_resources(force_refresh=False, check_latest=True)
 
 
 def _default_dates(
@@ -520,8 +549,7 @@ def _attach_rank_profiles(
             player["rankLabel"] = _rank_label(profile)
 
 
-@app.get("/api/meta/options")
-def get_options() -> dict[str, Any]:
+def _build_meta_options() -> dict[str, Any]:
     """프론트 초기 렌더링에 필요한 옵션을 반환한다."""
     config = _get_config()
     champion_data = _get_champion_data()
@@ -557,6 +585,20 @@ def get_options() -> dict[str, Any]:
         "queueId": config.queue_id,
         "latestSearchRiotId": cache.get_latest_search_riot_id(),
     }
+
+
+@app.get("/api/meta/options")
+def get_options() -> dict[str, Any]:
+    """프론트 초기 렌더링에 필요한 옵션을 반환한다."""
+    _ensure_data_dragon_checked()
+    return _build_meta_options()
+
+
+@app.post("/api/meta/refresh")
+def refresh_meta() -> dict[str, Any]:
+    """Data Dragon 정적 데이터를 즉시 갱신하고 메타 옵션을 반환한다."""
+    _refresh_data_dragon_resources(force_refresh=True, check_latest=True)
+    return _build_meta_options()
 
 
 @app.post("/api/jobs/search")

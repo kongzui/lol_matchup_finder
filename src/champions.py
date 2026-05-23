@@ -106,12 +106,16 @@ class ChampionRepository:
             conn.commit()
 
     # --- 외부 API ---
-    def load(self, force_refresh: bool = False) -> ChampionData:
+    def load(
+        self,
+        force_refresh: bool = False,
+        check_latest: bool = False,
+    ) -> ChampionData:
         """캐시가 유효하면 캐시를, 아니면 Data Dragon에서 새로 받아 반환한다."""
         cached = self._read_cache()
         now = int(time.time())
 
-        if not force_refresh and cached is not None:
+        if not force_refresh and not check_latest and cached is not None:
             cache_age = now - cached["fetched_at"]
             if cache_age < VERSION_CHECK_TTL_SECONDS and self._payload_has_spell_data(
                 cached["payload_json"]

@@ -29,6 +29,8 @@ async function requestJson<T>(url: string, options?: RequestInit): Promise<T> {
 
 export const api = {
   getMeta: () => requestJson<MetaOptions>("/api/meta/options"),
+  refreshMeta: () =>
+    requestJson<MetaOptions>("/api/meta/refresh", { method: "POST" }),
   createSearchJob: (body: SearchBody) =>
     requestJson<{ jobId: string }>("/api/jobs/search", {
       method: "POST",

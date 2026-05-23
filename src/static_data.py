@@ -182,7 +182,11 @@ class StaticDataRepository:
             conn.commit()
 
     # --- 외부 API ---
-    def load(self, force_refresh: bool = False) -> StaticData:
+    def load(
+        self,
+        force_refresh: bool = False,
+        check_latest: bool = False,
+    ) -> StaticData:
         """캐시가 유효하면 캐시를, 아니면 Data Dragon 에서 새로 받아 반환한다."""
         cached_summoner = self._read_cache(self._KIND_SUMMONER)
         cached_runes = self._read_cache(self._KIND_RUNES)
@@ -191,6 +195,7 @@ class StaticDataRepository:
         # 두 종류 모두 캐시되어 있고 TTL 안이라면 그대로 사용한다.
         if (
             not force_refresh
+            and not check_latest
             and cached_summoner is not None
             and cached_runes is not None
             and now - cached_summoner["fetched_at"] < VERSION_CHECK_TTL_SECONDS
