@@ -325,10 +325,17 @@ button {
   gap: 6px;
 }
 
-.recent-searches button {
+.recent-chip-wrap {
+  position: relative;
+  display: inline-flex;
+  max-width: 100%;
+  padding: 5px 5px 0 0;
+}
+
+.recent-searches .recent-chip {
   max-width: 100%;
   min-height: 32px;
-  padding: 0 10px;
+  padding: 0 14px 0 10px;
   overflow: hidden;
   border: 1px solid #303846;
   border-radius: 6px;
@@ -340,18 +347,42 @@ button {
   white-space: nowrap;
 }
 
-.recent-searches button:hover {
+.recent-searches .recent-chip:hover {
   border-color: #21d19f;
   color: #f4f7fb;
+}
+
+.recent-searches .recent-remove {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: grid;
+  width: 16px;
+  height: 16px;
+  min-height: 16px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid #303846;
+  border-radius: 999px;
+  background: #1d2430;
+  color: #aab4c3;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.recent-searches .recent-remove:hover {
+  border-color: #ff6b7a;
+  color: #ffb8c0;
 }
 
 .compact-history {
   gap: 6px;
 }
 
-.compact-history button {
+.compact-history .recent-chip {
   min-height: 28px;
-  padding: 0 8px;
+  padding: 0 12px 0 8px;
 }
 
 .check-field {

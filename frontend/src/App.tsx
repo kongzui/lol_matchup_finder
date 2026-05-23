@@ -326,6 +326,18 @@ function saveMyChampionHistory(history: string[]): void {
   }
 }
 
+function removeStoredHistoryItem(
+  item: string,
+  setHistory: Dispatch<SetStateAction<string[]>>,
+  saveHistory: (history: string[]) => void,
+): void {
+  setHistory((prev) => {
+    const next = prev.filter((historyItem) => historyItem !== item);
+    saveHistory(next);
+    return next;
+  });
+}
+
 function riotId(name?: string, tag?: string, fallback?: string): string {
   if (name && tag) {
     return `${name}#${tag}`;
@@ -730,6 +742,13 @@ function SearchWorkspace({
           <RecentRiotIdSearches
             history={riotIdHistory}
             onPick={applyHistoryItem}
+            onRemove={(value) =>
+              removeStoredHistoryItem(
+                value,
+                setRiotIdHistory,
+                saveRiotIdHistory,
+              )
+            }
           />
         </div>
         <div className="my-champion-field">
@@ -742,6 +761,13 @@ function SearchWorkspace({
           <RecentMyChampionSearches
             history={myChampionHistory}
             onPick={(value) => setBody({ ...body, myChampionKorean: value })}
+            onRemove={(value) =>
+              removeStoredHistoryItem(
+                value,
+                setMyChampionHistory,
+                saveMyChampionHistory,
+              )
+            }
           />
         </div>
         <div className="enemy-filter-field">
@@ -773,6 +799,13 @@ function SearchWorkspace({
           <RecentEnemyChampionSearches
             history={enemyChampionHistory}
             onPick={(value) => setBody({ ...body, enemyChampionKorean: value })}
+            onRemove={(value) =>
+              removeStoredHistoryItem(
+                value,
+                setEnemyChampionHistory,
+                saveEnemyChampionHistory,
+              )
+            }
           />
         </div>
         <SelectField
@@ -920,6 +953,13 @@ function MultiCollectWorkspace({
           <RecentRiotIdSearches
             history={riotIdHistory}
             onPick={applyHistoryItem}
+            onRemove={(value) =>
+              removeStoredHistoryItem(
+                value,
+                setRiotIdHistory,
+                saveRiotIdHistory,
+              )
+            }
           />
         </div>
         <SelectField
@@ -1107,6 +1147,13 @@ function DbLookupWorkspace({
           <RecentRiotIdSearches
             history={riotIdHistory}
             onPick={applyHistoryItem}
+            onRemove={(value) =>
+              removeStoredHistoryItem(
+                value,
+                setRiotIdHistory,
+                saveRiotIdHistory,
+              )
+            }
           />
         </div>
         <div className="my-champion-field">
@@ -1119,6 +1166,13 @@ function DbLookupWorkspace({
           <RecentMyChampionSearches
             history={myChampionHistory}
             onPick={(value) => setBody({ ...body, myChampionKorean: value })}
+            onRemove={(value) =>
+              removeStoredHistoryItem(
+                value,
+                setMyChampionHistory,
+                saveMyChampionHistory,
+              )
+            }
           />
         </div>
         <div className="enemy-filter-field">
@@ -1150,6 +1204,13 @@ function DbLookupWorkspace({
           <RecentEnemyChampionSearches
             history={enemyChampionHistory}
             onPick={(value) => setBody({ ...body, enemyChampionKorean: value })}
+            onRemove={(value) =>
+              removeStoredHistoryItem(
+                value,
+                setEnemyChampionHistory,
+                saveEnemyChampionHistory,
+              )
+            }
           />
         </div>
         {body.periodKind === meta.customPeriodLabel && (
@@ -1507,9 +1568,11 @@ function WorkspaceHeader({
 function RecentRiotIdSearches({
   history,
   onPick,
+  onRemove,
 }: {
   history: string[];
   onPick: (riotId: string) => void;
+  onRemove: (riotId: string) => void;
 }) {
   if (history.length === 0) {
     return null;
@@ -1522,14 +1585,12 @@ function RecentRiotIdSearches({
       </span>
       <div>
         {history.map((item) => (
-          <button
+          <RecentHistoryChip
             key={item}
-            type="button"
-            onClick={() => onPick(item)}
-            title={item}
-          >
-            {item}
-          </button>
+            item={item}
+            onPick={onPick}
+            onRemove={onRemove}
+          />
         ))}
       </div>
     </div>
@@ -1539,9 +1600,11 @@ function RecentRiotIdSearches({
 function RecentEnemyChampionSearches({
   history,
   onPick,
+  onRemove,
 }: {
   history: string[];
   onPick: (champion: string) => void;
+  onRemove: (champion: string) => void;
 }) {
   if (history.length === 0) {
     return null;
@@ -1554,14 +1617,12 @@ function RecentEnemyChampionSearches({
       </span>
       <div>
         {history.map((item) => (
-          <button
+          <RecentHistoryChip
             key={item}
-            type="button"
-            onClick={() => onPick(item)}
-            title={item}
-          >
-            {item}
-          </button>
+            item={item}
+            onPick={onPick}
+            onRemove={onRemove}
+          />
         ))}
       </div>
     </div>
@@ -1571,9 +1632,11 @@ function RecentEnemyChampionSearches({
 function RecentMyChampionSearches({
   history,
   onPick,
+  onRemove,
 }: {
   history: string[];
   onPick: (champion: string) => void;
+  onRemove: (champion: string) => void;
 }) {
   if (history.length === 0) {
     return null;
@@ -1589,17 +1652,47 @@ function RecentMyChampionSearches({
       </span>
       <div>
         {history.map((item) => (
-          <button
+          <RecentHistoryChip
             key={item}
-            type="button"
-            onClick={() => onPick(item)}
-            title={item}
-          >
-            {item}
-          </button>
+            item={item}
+            onPick={onPick}
+            onRemove={onRemove}
+          />
         ))}
       </div>
     </div>
+  );
+}
+
+function RecentHistoryChip({
+  item,
+  onPick,
+  onRemove,
+}: {
+  item: string;
+  onPick: (item: string) => void;
+  onRemove: (item: string) => void;
+}) {
+  return (
+    <span className="recent-chip-wrap">
+      <button
+        className="recent-chip"
+        type="button"
+        onClick={() => onPick(item)}
+        title={item}
+      >
+        {item}
+      </button>
+      <button
+        className="recent-remove"
+        type="button"
+        onClick={() => onRemove(item)}
+        title={`${item} 삭제`}
+        aria-label={`${item} 기록 삭제`}
+      >
+        ×
+      </button>
+    </span>
   );
 }
 
