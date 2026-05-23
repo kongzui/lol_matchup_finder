@@ -999,7 +999,10 @@ function MultiCollectWorkspace({
   };
 
   const applyMemoGroup = (items: PlayerMemo[]) => {
-    const nextValue = `${items.map(playerMemoName).join("\n")}\n`;
+    const nextValue = items.reduce(
+      (current, item) => appendRiotIdInput(current, playerMemoName(item)),
+      body.riotIdsRaw,
+    );
     setBody({ ...body, riotIdsRaw: nextValue });
     window.requestAnimationFrame(() => {
       textareaRef.current?.focus();
@@ -1186,7 +1189,10 @@ function DbLookupWorkspace({
   };
 
   const applyMemoGroup = (items: PlayerMemo[]) => {
-    const nextValue = `${items.map(playerMemoName).join("\n")}\n`;
+    const nextValue = items.reduce(
+      (current, item) => appendRiotIdInput(current, playerMemoName(item)),
+      body.riotIdsRaw,
+    );
     setBody({ ...body, riotIdsRaw: nextValue });
     window.requestAnimationFrame(() => {
       textareaRef.current?.focus();
@@ -1290,16 +1296,6 @@ function DbLookupWorkspace({
               onChange={(value) => setBody({ ...body, periodKind: value })}
             />
           </div>
-          <label className="check-field db-filter-option">
-            <input
-              type="checkbox"
-              checked={body.currentPatchOnly}
-              onChange={(event) =>
-                setBody({ ...body, currentPatchOnly: event.target.checked })
-              }
-            />
-            <span>이번 패치만</span>
-          </label>
           <RecentEnemyChampionSearches
             history={enemyChampionHistory}
             onPick={(value) => setBody({ ...body, enemyChampionKorean: value })}
@@ -1319,10 +1315,22 @@ function DbLookupWorkspace({
             />
           </div>
         )}
-        <button className="primary-action db-submit-action" type="submit">
-          <Database size={18} />
-          DB조회 실행
-        </button>
+        <div className="db-submit-area">
+          <label className="check-field db-filter-option">
+            <input
+              type="checkbox"
+              checked={body.currentPatchOnly}
+              onChange={(event) =>
+                setBody({ ...body, currentPatchOnly: event.target.checked })
+              }
+            />
+            <span>이번 패치만</span>
+          </label>
+          <button className="primary-action db-submit-action" type="submit">
+            <Database size={18} />
+            DB조회 실행
+          </button>
+        </div>
         <RecentRiotIdSearches
           className="db-riot-history"
           history={riotIdHistory}

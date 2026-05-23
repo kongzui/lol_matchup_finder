@@ -233,26 +233,26 @@ button {
   grid-template-columns: minmax(260px, 1.25fr) minmax(180px, 0.8fr) minmax(
       280px,
       1.45fr
-    ) minmax(140px, auto);
+    );
   grid-template-areas:
-    "users memo options action"
-    "recent recent recent recent";
+    "users memo options"
+    "recent recent action";
 }
 
 .control-panel.search-panel {
   grid-template-columns:
     minmax(200px, 1.1fr) minmax(130px, 0.75fr) repeat(3, minmax(110px, 1fr))
-    minmax(100px, 0.65fr) minmax(130px, auto);
+    minmax(100px, 0.65fr);
   grid-template-areas:
-    "riot my enemy enemy enemy max action"
-    "recent recent recent recent recent recent recent";
+    "riot my enemy enemy enemy max"
+    "recent recent recent recent recent action";
 }
 
 .control-panel.search-panel.custom-period {
   grid-template-areas:
-    "riot my enemy enemy enemy max action"
-    "dates dates dates dates dates dates dates"
-    "recent recent recent recent recent recent recent";
+    "riot my enemy enemy enemy max"
+    "dates dates dates dates dates dates"
+    "recent recent recent recent recent action";
 }
 
 .search-custom-period-fields {
@@ -264,7 +264,8 @@ button {
 
 .search-submit-action {
   grid-area: action;
-  width: 100%;
+  justify-self: end;
+  min-width: 130px;
 }
 
 .search-riot-history {
@@ -281,7 +282,8 @@ button {
 
 .multi-submit-action {
   grid-area: action;
-  width: 100%;
+  justify-self: end;
+  min-width: 130px;
 }
 
 .multi-riot-history {
@@ -290,24 +292,27 @@ button {
 }
 
 .control-panel.db-panel {
-  grid-template-columns:
-    minmax(220px, 1.15fr) minmax(140px, 0.85fr) repeat(3, minmax(120px, 1fr))
-    minmax(150px, auto);
+  grid-template-columns: minmax(220px, 1.15fr) minmax(140px, 0.85fr) repeat(
+      3,
+      minmax(120px, 1fr)
+    );
   grid-template-areas:
-    "users my enemy enemy enemy action"
-    "users recent recent recent recent recent";
+    "users my enemy enemy enemy"
+    "users recent recent recent recent";
 }
 
 .control-panel.db-panel.custom-period {
   grid-template-areas:
-    "users my enemy enemy enemy action"
-    "users dates dates recent recent recent";
+    "users my enemy enemy enemy"
+    "users dates dates dates dates"
+    "users recent recent recent recent";
 }
 
 .db-filter-option {
   min-height: 28px;
   color: #aab4c3;
   font-size: 12px;
+  white-space: nowrap;
 }
 
 .db-custom-period-fields {
@@ -317,14 +322,26 @@ button {
   gap: 12px;
 }
 
+.db-submit-area {
+  display: grid;
+  grid-area: recent;
+  align-self: end;
+  justify-items: end;
+  justify-self: end;
+  gap: 6px;
+  min-width: max-content;
+  z-index: 1;
+}
+
 .db-submit-action {
-  grid-area: action;
-  width: 100%;
+  min-width: 130px;
+  white-space: nowrap;
 }
 
 .db-riot-history {
   grid-area: recent;
   min-width: 0;
+  padding-right: 154px;
 }
 
 .field {
@@ -1745,9 +1762,13 @@ button {
   .db-panel .my-champion-field,
   .db-panel .enemy-filter-field,
   .db-custom-period-fields,
-  .db-submit-action,
+  .db-submit-area,
   .db-riot-history {
     grid-area: auto;
+  }
+
+  .db-riot-history {
+    padding-right: 0;
   }
 
   .search-custom-period-fields,
