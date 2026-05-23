@@ -15,10 +15,10 @@ from .search_service import fetch_all_match_ids, fetch_match_detail
 from .utils import days_ago_to_unix_range, parse_riot_id
 
 
-DEFAULT_MULTI_SEARCH_DAYS = 3
+DEFAULT_MULTI_SEARCH_DAYS = 30
 DEFAULT_MULTI_MATCHES_PER_PLAYER = 20
 MULTI_SEARCH_SOURCE = "manual_multi"
-MULTI_PERIOD_OPTIONS: tuple[int, ...] = (3, 7, 14, 30)
+MULTI_PERIOD_OPTIONS: tuple[int, ...] = (1, 3, 7, 14, 30, 90, 180)
 MULTI_MATCHES_PER_PLAYER_OPTIONS: tuple[int, ...] = (20, 50, 100)
 
 ProgressCallback = Callable[[float], None]
