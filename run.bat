@@ -27,6 +27,13 @@ if not exist "frontend\node_modules" (
     cd ..
 )
 
+chcp 65001 >nul
+python -X utf8 scripts\dev_server_guard.py both
+if errorlevel 1 (
+    pause
+    exit /b 1
+)
+
 echo Starting FastAPI backend on http://127.0.0.1:8000
 start "lol-matchup-backend" cmd /k "cd /d %cd% && call .venv\Scripts\activate.bat && python -m uvicorn src.api.main:app --host 127.0.0.1 --port 8000 --reload"
 
