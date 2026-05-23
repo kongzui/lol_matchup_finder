@@ -817,15 +817,24 @@ button {
   text-align: center;
 }
 
-.summoner-spells {
+.summoner-spells,
+.detail-runes {
   display: grid;
   gap: 3px;
 }
 
-.summoner-spells img {
+.summoner-spells img,
+.detail-runes img,
+.detail-runes span {
   width: 18px;
   height: 18px;
   border-radius: 4px;
+}
+
+.detail-runes img,
+.detail-runes span {
+  border-radius: 50%;
+  background: #10141d;
 }
 
 .team-player-name,

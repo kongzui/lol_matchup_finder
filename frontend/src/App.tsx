@@ -1453,6 +1453,7 @@ function TeamTable({
                 <img src={player.summoner2IconUrl} alt="" />
               )}
             </div>
+            <DetailRuneLoadout player={player} />
           </div>
           <div className="team-player-name">
             <strong>{participantName(player)}</strong>
@@ -1482,6 +1483,39 @@ function TeamTable({
         </div>
       ))}
     </section>
+  );
+}
+
+function DetailRuneLoadout({ player }: { player: DetailPlayer }) {
+  const runeIcons = [
+    {
+      url: player.primaryRuneIconUrls?.find(Boolean),
+      title: player.primaryRuneNames?.find(Boolean) || player.primaryTreeName,
+    },
+    {
+      url:
+        player.secondaryTreeIconUrl ||
+        player.secondaryRuneIconUrls?.find(Boolean),
+      title:
+        player.secondaryTreeName || player.secondaryRuneNames?.find(Boolean),
+    },
+  ];
+
+  return (
+    <div className="detail-runes">
+      {runeIcons.map((rune, index) =>
+        rune.url ? (
+          <img
+            key={`${rune.url}-${index}`}
+            src={rune.url}
+            alt=""
+            title={rune.title}
+          />
+        ) : (
+          <span key={`empty-rune-${index}`} />
+        ),
+      )}
+    </div>
   );
 }
 
