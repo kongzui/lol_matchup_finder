@@ -10,6 +10,8 @@ export interface MetaOptions {
   periodOptions: string[];
   defaultPeriod: string;
   customPeriodLabel: string;
+  dbPeriodOptions: string[];
+  defaultDbPeriod: string;
   multiPeriodOptions: number[];
   multiMatchesPerPlayerOptions: number[];
   defaultMultiDays: number;

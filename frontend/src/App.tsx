@@ -61,6 +61,61 @@ function daysAgoText(days: number): string {
   return date.toISOString().slice(0, 10);
 }
 
+function matchDate(row: MatchRow): Date | null {
+  if (row.game_creation) {
+    return new Date(row.game_creation);
+  }
+  if (row.game_date) {
+    const parsed = new Date(`${row.game_date}T00:00:00`);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+  return null;
+}
+
+function startOfLocalDay(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function relativeMatchDate(row: MatchRow): string {
+  const date = matchDate(row);
+  if (!date) {
+    return "-";
+  }
+
+  const today = startOfLocalDay(new Date());
+  const target = startOfLocalDay(date);
+  const daysAgo = Math.max(
+    Math.floor((today.getTime() - target.getTime()) / 86_400_000),
+    0,
+  );
+
+  if (daysAgo === 0) {
+    return "오늘";
+  }
+  if (daysAgo < 7) {
+    return `${daysAgo}일 전`;
+  }
+  if (daysAgo < 30) {
+    return `${Math.floor(daysAgo / 7)}주일 전`;
+  }
+  return `${Math.floor(daysAgo / 30)}개월 전`;
+}
+
+function exactMatchDate(row: MatchRow): string {
+  const date = matchDate(row);
+  if (!date) {
+    return "";
+  }
+  return new Intl.DateTimeFormat("ko-KR", {
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).format(date);
+}
+
 function championIcon(version: string, key?: string): string {
   return key
     ? `https://ddragon.leagueoflegends.com/cdn/${version}/img/champion/${key}.png`
@@ -774,7 +829,7 @@ function DbLookupWorkspace({
       : meta.champions[0].koreanName,
     enemyChampionKorean: meta.dbEnemyAllLabel,
     laneLabel: "미드",
-    periodKind: meta.defaultPeriod,
+    periodKind: meta.defaultDbPeriod,
     customStart: daysAgoText(90),
     customEnd: todayText(),
     currentPatchOnly: false,
@@ -863,7 +918,7 @@ function DbLookupWorkspace({
             <SelectField
               label="기간"
               value={body.periodKind}
-              options={meta.periodOptions}
+              options={meta.dbPeriodOptions}
               onChange={(value) => setBody({ ...body, periodKind: value })}
             />
           </div>
@@ -1353,12 +1408,14 @@ function MatchResultCard({
   const enemyId = riotId(enemyName, enemyTag, row.enemy_riot_id);
   const enemyLink = opggUrl(enemyName, enemyTag);
   const resultClass = row.win ? "win" : "loss";
+  const matchDateLabel = relativeMatchDate(row);
+  const matchDateTitle = exactMatchDate(row);
 
   return (
     <div className={`card-grid ${resultClass}`}>
       <div className="match-meta">
         <strong>{row.win ? "승리" : "패배"}</strong>
-        <span>{row.game_date || "-"}</span>
+        <span title={matchDateTitle}>{matchDateLabel}</span>
         <em>{secondsToMinutes(row.game_duration)}</em>
       </div>
       <div className="player-summary">

@@ -10,7 +10,6 @@ from .cache import MatchCache
 from .champions import ChampionData
 from .riot_client import RiotApiError
 from .search_service import (
-    DEFAULT_PERIOD_LABEL,
     PERIOD_CUSTOM_LABEL,
     PERIOD_PRESETS,
 )
@@ -18,6 +17,13 @@ from .utils import LANE_LABEL_TO_TEAM_POSITION, date_range_to_unix
 
 
 DB_ENEMY_ALL_LABEL = "전체"
+DB_PERIOD_ALL_LABEL = "전체"
+DB_PERIOD_OPTIONS: tuple[str, ...] = (
+    DB_PERIOD_ALL_LABEL,
+    *PERIOD_PRESETS.keys(),
+    PERIOD_CUSTOM_LABEL,
+)
+DB_DEFAULT_PERIOD_LABEL = DB_PERIOD_ALL_LABEL
 
 
 @dataclass(frozen=True)
@@ -78,7 +84,10 @@ def run_indexed_matchup_search(
     if request.lane_label not in LANE_LABEL_TO_TEAM_POSITION:
         raise RiotApiError("선택한 라인을 인식하지 못했습니다.")
     lane_value = LANE_LABEL_TO_TEAM_POSITION[request.lane_label]
-    if request.period_kind in PERIOD_PRESETS:
+    if request.period_kind == DB_PERIOD_ALL_LABEL:
+        start_ts = 0
+        end_ts = int(datetime.now().timestamp())
+    elif request.period_kind in PERIOD_PRESETS:
         days = PERIOD_PRESETS[request.period_kind]
         end_ts = int(datetime.now().timestamp())
         start_ts = end_ts - days * 24 * 60 * 60
@@ -112,7 +121,7 @@ def run_indexed_matchup_search(
         my_champion_key=my_champion_key,
         enemy_champion_key=enemy_champion_key,
         lane_label=request.lane_label,
-        period_kind=request.period_kind or DEFAULT_PERIOD_LABEL,
+        period_kind=request.period_kind or DB_DEFAULT_PERIOD_LABEL,
         start_ts=start_ts,
         end_ts=end_ts,
         patch_prefix=patch_prefix,

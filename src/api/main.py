@@ -17,7 +17,9 @@ from src.cache import MatchCache
 from src.champions import ChampionData, ChampionRepository, champion_icon_url
 from src.config import AppConfig, load_config
 from src.db_search_service import (
+    DB_DEFAULT_PERIOD_LABEL,
     DB_ENEMY_ALL_LABEL,
+    DB_PERIOD_OPTIONS,
     IndexedMatchupSearchPayload,
     IndexedMatchupSearchRequest,
     run_indexed_matchup_search,
@@ -98,7 +100,7 @@ class DbSearchBody(BaseModel):
     my_champion_korean: str = Field(alias="myChampionKorean")
     enemy_champion_korean: str = Field(alias="enemyChampionKorean")
     lane_label: str = Field(alias="laneLabel")
-    period_kind: str = Field(alias="periodKind", default=DEFAULT_PERIOD_LABEL)
+    period_kind: str = Field(alias="periodKind", default=DB_DEFAULT_PERIOD_LABEL)
     custom_start: date | None = Field(alias="customStart", default=None)
     custom_end: date | None = Field(alias="customEnd", default=None)
     current_patch_only: bool = Field(alias="currentPatchOnly", default=False)
@@ -572,6 +574,8 @@ def _build_meta_options() -> dict[str, Any]:
         "periodOptions": PERIOD_OPTIONS,
         "defaultPeriod": DEFAULT_PERIOD_LABEL,
         "customPeriodLabel": PERIOD_CUSTOM_LABEL,
+        "dbPeriodOptions": DB_PERIOD_OPTIONS,
+        "defaultDbPeriod": DB_DEFAULT_PERIOD_LABEL,
         "multiPeriodOptions": MULTI_PERIOD_OPTIONS,
         "multiMatchesPerPlayerOptions": MULTI_MATCHES_PER_PLAYER_OPTIONS,
         "defaultMultiDays": DEFAULT_MULTI_SEARCH_DAYS,
