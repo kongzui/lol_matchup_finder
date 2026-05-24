@@ -660,7 +660,7 @@ export default function App() {
             <NavButton
               active={active === "multi"}
               icon={<UploadCloud size={18} />}
-              label="멀티서치"
+              label="유저 매치 수집"
               onClick={() => setActive("multi")}
             />
           </div>
