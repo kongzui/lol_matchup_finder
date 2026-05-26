@@ -743,7 +743,7 @@ export default function App() {
       </aside>
 
       <main className="workspace">
-        {active === "search" && (
+        <div hidden={active !== "search"}>
           <SearchWorkspace
             meta={meta}
             riotIdHistory={riotIdHistory}
@@ -753,15 +753,15 @@ export default function App() {
             myChampionHistory={myChampionHistory}
             setMyChampionHistory={setMyChampionHistory}
           />
-        )}
-        {active === "multi" && (
+        </div>
+        <div hidden={active !== "multi"}>
           <MultiCollectWorkspace
             meta={meta}
             riotIdHistory={riotIdHistory}
             setRiotIdHistory={setRiotIdHistory}
           />
-        )}
-        {active === "db" && (
+        </div>
+        <div hidden={active !== "db"}>
           <DbLookupWorkspace
             meta={meta}
             riotIdHistory={riotIdHistory}
@@ -771,7 +771,7 @@ export default function App() {
             myChampionHistory={myChampionHistory}
             setMyChampionHistory={setMyChampionHistory}
           />
-        )}
+        </div>
         {active === "memo" && <PlayerMemoWorkspace />}
         {active === "history" && (
           <RecentHistoryWorkspace
