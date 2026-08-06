@@ -517,9 +517,11 @@ class MatchCache:
                     pm.puuid,
                     pm.memo,
                     pr.riot_id_game_name,
-                    pr.riot_id_tag_line
+                    pr.riot_id_tag_line,
+                    mcu.last_collected_at
                 FROM player_memo pm
                 JOIN player_registry pr ON pr.puuid = pm.puuid
+                LEFT JOIN manual_collection_user mcu ON mcu.puuid = pm.puuid
                 WHERE pm.auto_refresh_enabled = 1
                   AND pr.riot_id_game_name IS NOT NULL
                   AND pr.riot_id_tag_line IS NOT NULL

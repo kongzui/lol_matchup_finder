@@ -43,6 +43,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  createPlayerMatchCollectionJob: (confirmed: boolean) =>
+    requestJson<{ jobId: string }>("/api/jobs/player-match-collection", {
+      method: "POST",
+      body: JSON.stringify({ confirmed }),
+    }),
   getJob: (jobId: string) => requestJson<JobStatus>(`/api/jobs/${jobId}`),
   getJobResult: (jobId: string) =>
     requestJson<JobPayload>(`/api/jobs/${jobId}/result`),

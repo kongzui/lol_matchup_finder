@@ -150,12 +150,19 @@ function dbLastMatchText(timestamp?: number | null): string {
   }).format(new Date(timestamp));
 }
 
-function autoRefreshSummary(meta: MetaOptions): string {
+function playerMatchCollectionSummary(meta: MetaOptions): string {
   const refresh = meta.autoRefresh;
   if (refresh.status === "running" && refresh.targetCount) {
-    return `자동갱신 중 · ${refresh.targetCount}명`;
+    return `${refresh.targetCount}명 매치 수집 중`;
   }
   return refresh.message;
+}
+
+function playerMatchCollectionScope(meta: MetaOptions): string {
+  const lastCollected = meta.autoRefresh.lastCollectedAt
+    ? memoDate(meta.autoRefresh.lastCollectedAt)
+    : "기록 없음";
+  return `대상 ${meta.autoRefresh.targetCount}명 · 마지막 수집 ${lastCollected}`;
 }
 
 function matchPatchVersion(row: MatchRow): string | null {
@@ -480,6 +487,7 @@ function downloadBlob(blob: Blob, filename: string): void {
 function useJobPoller(
   jobId: string | null,
   onDone: (status: JobStatus) => Promise<void>,
+  onFailed?: (status: JobStatus) => Promise<void>,
 ) {
   const [job, setJob] = useState<JobStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -488,6 +496,8 @@ function useJobPoller(
     if (!jobId) {
       return;
     }
+    setJob(null);
+    setError(null);
     let cancelled = false;
     const poll = async () => {
       try {
@@ -502,6 +512,9 @@ function useJobPoller(
         }
         if (status.status === "failed") {
           setError(status.error || "작업에 실패했습니다.");
+          if (onFailed) {
+            await onFailed(status);
+          }
           return;
         }
         window.setTimeout(poll, 900);
@@ -561,6 +574,10 @@ export default function App() {
   );
   const [metaRefreshing, setMetaRefreshing] = useState(false);
   const [metaRefreshError, setMetaRefreshError] = useState<string | null>(null);
+  const [collectionStarting, setCollectionStarting] = useState(false);
+  const [collectionStartError, setCollectionStartError] = useState<
+    string | null
+  >(null);
 
   useEffect(() => {
     api
@@ -609,9 +626,46 @@ export default function App() {
 
   const autoRefreshJobId =
     meta?.autoRefresh.status === "running" ? meta.autoRefresh.jobId : null;
-  const autoRefreshPoller = useJobPoller(autoRefreshJobId, async () => {
-    setMeta(await api.getMeta());
-  });
+  const autoRefreshPoller = useJobPoller(
+    autoRefreshJobId,
+    async () => {
+      setMeta(await api.getMeta());
+    },
+    async () => {
+      setMeta(await api.getMeta());
+    },
+  );
+
+  const startPlayerMatchCollection = async () => {
+    if (!meta) {
+      return;
+    }
+
+    const refresh = meta.autoRefresh;
+    let confirmed = false;
+    if (refresh.requiresConfirmation) {
+      confirmed = window.confirm(
+        `최근 ${refresh.days}일, 최대 ${refresh.matchesPerPlayer}판씩 수집할까요?`,
+      );
+      if (!confirmed) {
+        return;
+      }
+    }
+
+    setCollectionStarting(true);
+    setCollectionStartError(null);
+    autoRefreshPoller.setError(null);
+    try {
+      await api.createPlayerMatchCollectionJob(confirmed);
+      setMeta(await api.getMeta());
+    } catch (exc) {
+      setCollectionStartError(
+        exc instanceof Error ? exc.message : "매치 수집 시작 실패",
+      );
+    } finally {
+      setCollectionStarting(false);
+    }
+  };
 
   const refreshMeta = async () => {
     setMetaRefreshing(true);
@@ -701,15 +755,51 @@ export default function App() {
               <strong>{dbLastMatchText(meta.dbLastMatchCreation)}</strong>
             </p>
           </div>
-          <div className={`server-auto-refresh ${meta.autoRefresh.status}`}>
-            <p>
-              <span>자동갱신</span>
-              <strong>{autoRefreshSummary(meta)}</strong>
+          <div className={`server-match-collection ${meta.autoRefresh.status}`}>
+            <div className="server-collection-head">
+              <span>앱 시작 시 매치 수집</span>
+            </div>
+            <p className="server-collection-scope">
+              {playerMatchCollectionScope(meta)}
             </p>
-            {meta.autoRefresh.days !== null &&
+            <strong className="server-collection-state">
+              {playerMatchCollectionSummary(meta)}
+            </strong>
+            {meta.autoRefresh.requiresConfirmation && (
+              <p className="server-collection-confirmation">
+                지금 수집을 누르면 최근 {meta.autoRefresh.days}일 · 최대{" "}
+                {meta.autoRefresh.matchesPerPlayer}판씩 수집할지 확인해요.
+              </p>
+            )}
+            <button
+              className="server-collect-button"
+              type="button"
+              onClick={startPlayerMatchCollection}
+              disabled={
+                collectionStarting ||
+                meta.autoRefresh.status === "running" ||
+                meta.autoRefresh.targetCount === 0 ||
+                !meta.apiKeyDetected
+              }
+              title="설정된 유저의 매치를 지금 수집"
+            >
+              <RefreshCw
+                className={
+                  collectionStarting || meta.autoRefresh.status === "running"
+                    ? "spin"
+                    : ""
+                }
+                size={13}
+              />
+              {collectionStarting || meta.autoRefresh.status === "running"
+                ? "수집 중"
+                : "지금 수집"}
+            </button>
+            {meta.autoRefresh.status === "running" &&
+              meta.autoRefresh.days !== null &&
               meta.autoRefresh.matchesPerPlayer !== null && (
                 <em>
-                  최근 {meta.autoRefresh.days}일 · 1인당{" "}
+                  최근 {meta.autoRefresh.days}일 · 1인당 최대{" "}
                   {meta.autoRefresh.matchesPerPlayer}판
                 </em>
               )}
@@ -721,6 +811,24 @@ export default function App() {
             )}
             {autoRefreshPoller.error && (
               <em className="server-error-text">{autoRefreshPoller.error}</em>
+            )}
+            {collectionStartError && (
+              <em className="server-error-text">{collectionStartError}</em>
+            )}
+            {meta.autoRefresh.failures.length > 0 && (
+              <details className="server-collection-failures">
+                <summary>
+                  실패한 유저 {meta.autoRefresh.failures.length}명
+                </summary>
+                <div>
+                  {meta.autoRefresh.failures.map((failure) => (
+                    <p key={failure.riot_id_raw}>
+                      <strong>{failure.riot_id_raw}</strong>
+                      <span>{failure.reason}</span>
+                    </p>
+                  ))}
+                </div>
+              </details>
             )}
           </div>
           <div className="data-dragon-row">
@@ -772,7 +880,13 @@ export default function App() {
             setMyChampionHistory={setMyChampionHistory}
           />
         </div>
-        {active === "memo" && <PlayerMemoWorkspace />}
+        {active === "memo" && (
+          <PlayerMemoWorkspace
+            onCollectionSettingsChanged={async () => {
+              setMeta(await api.getMeta());
+            }}
+          />
+        )}
         {active === "history" && (
           <RecentHistoryWorkspace
             riotIdHistory={riotIdHistory}
@@ -1498,7 +1612,11 @@ function DbLookupWorkspace({
   );
 }
 
-function PlayerMemoWorkspace() {
+function PlayerMemoWorkspace({
+  onCollectionSettingsChanged,
+}: {
+  onCollectionSettingsChanged: () => Promise<void>;
+}) {
   const [items, setItems] = useState<PlayerMemo[]>([]);
   const [riotIdRaw, setRiotIdRaw] = useState("");
   const [memo, setMemo] = useState("");
@@ -1553,14 +1671,17 @@ function PlayerMemoWorkspace() {
     }
   };
 
-  const saveAutoRefresh = async (item: PlayerMemo, enabled: boolean) => {
+  const saveStartupCollection = async (item: PlayerMemo, enabled: boolean) => {
     setSaving(true);
     setError(null);
     try {
       await api.updatePlayerMemoAutoRefresh(item.puuid, enabled);
       await loadMemos();
+      await onCollectionSettingsChanged();
     } catch (exc) {
-      setError(exc instanceof Error ? exc.message : "자동갱신 설정 실패");
+      setError(
+        exc instanceof Error ? exc.message : "앱 시작 시 수집 설정 실패",
+      );
     } finally {
       setSaving(false);
     }
@@ -1590,6 +1711,7 @@ function PlayerMemoWorkspace() {
     try {
       await api.deletePlayerMemo(item.puuid);
       await loadMemos();
+      await onCollectionSettingsChanged();
     } catch (exc) {
       setError(exc instanceof Error ? exc.message : "메모 삭제 실패");
     } finally {
@@ -1702,11 +1824,14 @@ function PlayerMemoWorkspace() {
                                 type="checkbox"
                                 checked={item.auto_refresh_enabled}
                                 onChange={(event) =>
-                                  saveAutoRefresh(item, event.target.checked)
+                                  saveStartupCollection(
+                                    item,
+                                    event.target.checked,
+                                  )
                                 }
                                 disabled={saving}
                               />
-                              자동갱신
+                              앱 시작 시 수집
                             </label>
                             {isEditing ? (
                               <>

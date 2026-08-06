@@ -126,6 +126,12 @@ class PlayerMemoAutoRefreshBody(BaseModel):
     enabled: bool
 
 
+class PlayerMatchCollectionBody(BaseModel):
+    """메모 유저 매치 수집 요청."""
+
+    confirmed: bool = False
+
+
 class ResolveRiotIdBody(BaseModel):
     """Riot ID를 PUUID로 변환하는 요청."""
 
@@ -202,21 +208,27 @@ _champion_data: ChampionData | None = None
 _static_data: StaticData | None = None
 _data_dragon_checked = False
 _resource_lock = threading.Lock()
-_auto_refresh_lock = threading.Lock()
+_auto_refresh_lock = threading.RLock()
 _auto_refresh_checked = False
 _auto_refresh_status: dict[str, Any] = {
     "status": "not_checked",
-    "message": "자동갱신을 아직 확인하지 않았습니다.",
+    "message": "앱 시작 시 매치 수집을 아직 확인하지 않았습니다.",
     "jobId": None,
     "targetCount": 0,
     "days": None,
     "matchesPerPlayer": None,
+    "lastCollectedAt": None,
+    "requiresConfirmation": False,
+    "successCount": None,
+    "failureCount": None,
+    "failures": [],
 }
 
 AUTO_REFRESH_SKIP_DAYS = 2
 AUTO_REFRESH_MAX_DAYS = 60
 AUTO_REFRESH_MATCHES_PER_DAY = 5
 AUTO_REFRESH_MAX_MATCHES_PER_PLAYER = 300
+STALE_COLLECTION_DAYS = 90
 
 
 def _get_config() -> AppConfig:
@@ -504,9 +516,45 @@ def _set_auto_refresh_status(**changes: Any) -> None:
         _auto_refresh_status.update(changes)
 
 
+def _collection_targets() -> list[dict[str, Any]]:
+    return _get_cache().list_auto_refresh_player_memos()
+
+
+def _latest_target_collection_at(targets: list[dict[str, Any]]) -> int | None:
+    collected_at = [
+        target["last_collected_at"] for target in targets if target["last_collected_at"]
+    ]
+    return max(collected_at, default=None)
+
+
+def _days_since_latest_match() -> int | None:
+    last_match_creation = _get_cache().get_match_cache_stats()["last_match_creation"]
+    if not last_match_creation:
+        return None
+    return max(ceil((time.time() * 1000 - last_match_creation) / 86_400_000), 0)
+
+
+def _collection_plan(days_since_latest_match: int | None) -> tuple[int, int, bool]:
+    if days_since_latest_match is None:
+        return DEFAULT_MULTI_SEARCH_DAYS, DEFAULT_MULTI_MATCHES_PER_PLAYER, False
+    if days_since_latest_match >= AUTO_REFRESH_MAX_DAYS:
+        return STALE_COLLECTION_DAYS, AUTO_REFRESH_MAX_MATCHES_PER_PLAYER, True
+
+    days = max(days_since_latest_match, 1)
+    matches_per_player = min(
+        days * AUTO_REFRESH_MATCHES_PER_DAY,
+        AUTO_REFRESH_MAX_MATCHES_PER_PLAYER,
+    )
+    return days, matches_per_player, False
+
+
 def _auto_refresh_payload() -> dict[str, Any]:
     with _auto_refresh_lock:
         status = dict(_auto_refresh_status)
+
+    targets = _collection_targets()
+    status["targetCount"] = len(targets)
+    status["lastCollectedAt"] = _latest_target_collection_at(targets)
 
     job_id = status.get("jobId")
     if job_id:
@@ -517,17 +565,58 @@ def _auto_refresh_payload() -> dict[str, Any]:
                 status["message"] = job.message or status["message"]
             elif job.status == "succeeded":
                 status["status"] = "succeeded"
-                status["message"] = job.message or "자동갱신 완료"
+                if job.result is not None:
+                    failures = [asdict(failure) for failure in job.result.failures]
+                    status["successCount"] = job.result.success_count
+                    status["failureCount"] = job.result.failure_count
+                    status["failures"] = failures
+                    status["message"] = (
+                        f"{job.result.success_count}명 성공 · "
+                        f"{job.result.failure_count}명 실패"
+                    )
+                else:
+                    status["message"] = job.message or "매치 수집 완료"
             elif job.status == "failed":
                 status["status"] = "failed"
-                status["message"] = job.error or "자동갱신 실패"
+                status["message"] = job.error or "매치 수집 실패"
 
     return status
 
 
-def _auto_refresh_message_for_stale(days: int) -> str:
-    months = max(days // 30, 2)
-    return f"마지막 갱신이 {months}달 전입니다. 갱신이 필요합니다."
+def _start_player_match_collection(
+    *,
+    targets: list[dict[str, Any]],
+    days: int,
+    matches_per_player: int,
+) -> JobRecord:
+    riot_ids = [
+        f"{target['riot_id_game_name']}#{target['riot_id_tag_line']}"
+        for target in targets
+    ]
+    request = MultiSearchRequest(
+        riot_ids_raw=", ".join(riot_ids),
+        days=days,
+        matches_per_player=matches_per_player,
+    )
+    job = _create_multi_search_job(
+        request=request,
+        kind="player-match-collection",
+        success_message="매치 수집 완료",
+    )
+    _set_auto_refresh_status(
+        status="running",
+        message="매치 수집 중입니다.",
+        jobId=job.job_id,
+        targetCount=len(targets),
+        days=days,
+        matchesPerPlayer=matches_per_player,
+        lastCollectedAt=_latest_target_collection_at(targets),
+        requiresConfirmation=False,
+        successCount=None,
+        failureCount=None,
+        failures=[],
+    )
+    return job
 
 
 def _maybe_start_auto_refresh() -> None:
@@ -541,87 +630,89 @@ def _maybe_start_auto_refresh() -> None:
         _auto_refresh_status.update(
             {
                 "status": "checking",
-                "message": "자동갱신 조건을 확인 중입니다.",
+                "message": "앱 시작 시 매치 수집 조건을 확인 중입니다.",
                 "jobId": None,
                 "targetCount": 0,
                 "days": None,
                 "matchesPerPlayer": None,
+                "lastCollectedAt": None,
+                "requiresConfirmation": False,
+                "successCount": None,
+                "failureCount": None,
+                "failures": [],
             }
         )
 
-    cache = _get_cache()
-    stats = cache.get_match_cache_stats()
-    last_match_creation = stats["last_match_creation"]
-    if not last_match_creation:
+    targets = _collection_targets()
+    last_collected_at = _latest_target_collection_at(targets)
+    days_since_latest_match = _days_since_latest_match()
+    days, matches_per_player, requires_confirmation = _collection_plan(
+        days_since_latest_match
+    )
+
+    if not targets:
         _set_auto_refresh_status(
             status="skipped",
-            message="DB에 저장된 매치가 없어 자동갱신을 건너뜁니다.",
-        )
-        return
-
-    days = max(ceil((time.time() * 1000 - last_match_creation) / 86_400_000), 0)
-    if days <= AUTO_REFRESH_SKIP_DAYS:
-        _set_auto_refresh_status(
-            status="skipped",
-            message=(
-                f"마지막 매치가 {AUTO_REFRESH_SKIP_DAYS}일 이내라\n"
-                "자동갱신을 건너뜁니다."
-            ),
+            message="앱 시작 시 수집이 켜진 메모 유저가 없습니다.",
             days=days,
-        )
-        return
-
-    if days > AUTO_REFRESH_MAX_DAYS:
-        _set_auto_refresh_status(
-            status="stale",
-            message=_auto_refresh_message_for_stale(days),
-            days=days,
+            matchesPerPlayer=matches_per_player,
+            targetCount=0,
+            lastCollectedAt=None,
         )
         return
 
     if not _get_config().api_key:
         _set_auto_refresh_status(
             status="skipped",
-            message="RIOT_API_KEY가 없어 자동갱신을 건너뜁니다.",
+            message="RIOT_API_KEY가 없어 시작 시 수집을 건너뜁니다.",
             days=days,
+            matchesPerPlayer=matches_per_player,
+            targetCount=len(targets),
+            lastCollectedAt=last_collected_at,
         )
         return
 
-    targets = cache.list_auto_refresh_player_memos()
-    if not targets:
+    if days_since_latest_match is None:
         _set_auto_refresh_status(
             status="skipped",
-            message="자동갱신이 켜진 메모 유저가 없습니다.",
+            message="저장된 매치가 없어 자동 수집을 건너뜁니다.",
+            targetCount=len(targets),
             days=days,
-            targetCount=0,
+            matchesPerPlayer=matches_per_player,
+            lastCollectedAt=last_collected_at,
         )
         return
 
-    matches_per_player = min(
-        days * AUTO_REFRESH_MATCHES_PER_DAY,
-        AUTO_REFRESH_MAX_MATCHES_PER_PLAYER,
-    )
-    riot_ids = [
-        f"{target['riot_id_game_name']}#{target['riot_id_tag_line']}"
-        for target in targets
-    ]
-    request = MultiSearchRequest(
-        riot_ids_raw=", ".join(riot_ids),
+    if days_since_latest_match <= AUTO_REFRESH_SKIP_DAYS:
+        _set_auto_refresh_status(
+            status="skipped",
+            message=(
+                f"마지막 매치가 {AUTO_REFRESH_SKIP_DAYS}일 이내라 "
+                "시작 시 수집을 건너뛰었습니다."
+            ),
+            days=days,
+            matchesPerPlayer=matches_per_player,
+            targetCount=len(targets),
+            lastCollectedAt=last_collected_at,
+        )
+        return
+
+    if requires_confirmation:
+        _set_auto_refresh_status(
+            status="stale",
+            message="오랫동안 수집하지 않아 확인이 필요합니다.",
+            days=days,
+            matchesPerPlayer=matches_per_player,
+            targetCount=len(targets),
+            lastCollectedAt=last_collected_at,
+            requiresConfirmation=True,
+        )
+        return
+
+    _start_player_match_collection(
+        targets=targets,
         days=days,
         matches_per_player=matches_per_player,
-    )
-    job = _create_multi_search_job(
-        request=request,
-        kind="auto-refresh",
-        success_message="자동갱신 완료",
-    )
-    _set_auto_refresh_status(
-        status="running",
-        message="자동갱신 중입니다.",
-        jobId=job.job_id,
-        targetCount=len(targets),
-        days=days,
-        matchesPerPlayer=matches_per_player,
     )
 
 
@@ -1043,6 +1134,47 @@ def create_multi_search_job(body: MultiSearchJobBody) -> dict[str, str]:
         matches_per_player=body.matches_per_player,
     )
     job = _create_multi_search_job(request=request)
+    return {"jobId": job.job_id}
+
+
+@app.post("/api/jobs/player-match-collection")
+def create_player_match_collection_job(
+    body: PlayerMatchCollectionBody,
+) -> dict[str, str]:
+    """앱 시작 시 수집 대상의 매치를 사용자가 즉시 수집한다."""
+    with _auto_refresh_lock:
+        active_job_id = _auto_refresh_status.get("jobId")
+        if active_job_id:
+            active_job = _jobs.get(active_job_id)
+            if active_job is not None and active_job.status in {"queued", "running"}:
+                raise HTTPException(
+                    status_code=409, detail="매치 수집이 이미 진행 중입니다."
+                )
+
+        if not _get_config().api_key:
+            raise HTTPException(status_code=400, detail="RIOT_API_KEY가 필요합니다.")
+
+        targets = _collection_targets()
+        if not targets:
+            raise HTTPException(
+                status_code=400,
+                detail="앱 시작 시 수집이 켜진 메모 유저가 없습니다.",
+            )
+
+        days, matches_per_player, requires_confirmation = _collection_plan(
+            _days_since_latest_match()
+        )
+        if requires_confirmation and not body.confirmed:
+            raise HTTPException(
+                status_code=409,
+                detail=f"최근 {days}일, 최대 {matches_per_player}판씩 수집할까요?",
+            )
+
+        job = _start_player_match_collection(
+            targets=targets,
+            days=days,
+            matches_per_player=matches_per_player,
+        )
     return {"jobId": job.job_id}
 
 

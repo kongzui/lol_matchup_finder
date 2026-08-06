@@ -41,6 +41,11 @@ export interface MetaOptions {
     targetCount: number;
     days: number | null;
     matchesPerPlayer: number | null;
+    lastCollectedAt: number | null;
+    requiresConfirmation: boolean;
+    successCount: number | null;
+    failureCount: number | null;
+    failures: Array<{ riot_id_raw: string; reason: string }>;
   };
 }
 
