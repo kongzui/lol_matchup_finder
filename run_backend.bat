@@ -20,5 +20,5 @@ if not defined BACKEND_PORT (
 )
 
 echo Starting FastAPI backend on http://127.0.0.1:%BACKEND_PORT%
-start "lol-matchup-backend" cmd /k "cd /d %cd% && call .venv\Scripts\activate.bat && %cd%\.venv\Scripts\python.exe -m uvicorn src.api.main:app --host 127.0.0.1 --port %BACKEND_PORT% --reload"
+start "lol-matchup-backend" cmd /k "cd /d %cd% && call .venv\Scripts\activate.bat && %cd%\.venv\Scripts\python.exe -m uvicorn src.api.main:app --host 127.0.0.1 --port %BACKEND_PORT% --reload --no-access-log"
 exit /b 0

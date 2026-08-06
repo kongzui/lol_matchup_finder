@@ -46,7 +46,7 @@ if not defined FRONTEND_PORT (
 )
 
 echo Starting FastAPI backend on http://127.0.0.1:%BACKEND_PORT%
-start "lol-matchup-backend" cmd /k "cd /d %cd% && call .venv\Scripts\activate.bat && %cd%\.venv\Scripts\python.exe -m uvicorn src.api.main:app --host 127.0.0.1 --port %BACKEND_PORT% --reload"
+start "lol-matchup-backend" cmd /k "cd /d %cd% && call .venv\Scripts\activate.bat && %cd%\.venv\Scripts\python.exe -m uvicorn src.api.main:app --host 127.0.0.1 --port %BACKEND_PORT% --reload --no-access-log"
 
 echo Starting React frontend on http://127.0.0.1:%FRONTEND_PORT%
 start "lol-matchup-frontend" cmd /k "cd /d %cd%\frontend && npm.cmd run dev"
