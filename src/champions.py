@@ -215,6 +215,9 @@ class ChampionRepository:
             korean_name = entry.get("name")
             if not english_key or not korean_name:
                 continue
+            # Data Dragon의 Jade 변형은 일반 챔피언과 이름이 같아 조회 키를 덮어쓴다.
+            if english_key.startswith("Jade_"):
+                continue
             ko_to_en[korean_name] = english_key
             en_to_ko[english_key] = korean_name
             spells = []
