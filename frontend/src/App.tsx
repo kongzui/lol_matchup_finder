@@ -693,8 +693,13 @@ export default function App() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand">
-          <span>LoL</span>
-          <strong>Matchup Finder</strong>
+          <div className="brand-mark" aria-hidden="true">
+            MF
+          </div>
+          <div className="brand-copy">
+            <span>LOCAL MATCH DATA</span>
+            <strong>Matchup Finder</strong>
+          </div>
         </div>
         <nav className="nav-list" aria-label="작업공간">
           <div className="nav-section">
@@ -735,29 +740,54 @@ export default function App() {
           </div>
         </nav>
         <div className="server-card">
-          <div className="server-title">
-            <Server size={16} />
-            서버 상태
+          <div className="server-card-head">
+            <div className="server-title">
+              <span className="server-icon" aria-hidden="true">
+                <Server size={16} />
+              </span>
+              <div>
+                <span>시스템 상태</span>
+                <strong>
+                  {meta.apiKeyDetected ? "검색 준비 완료" : "API 설정 필요"}
+                </strong>
+              </div>
+            </div>
+            <span
+              className={meta.apiKeyDetected ? "status ok" : "status danger"}
+            >
+              <i aria-hidden="true" />
+              {meta.apiKeyDetected ? "준비됨" : "확인 필요"}
+            </span>
           </div>
-          <span className={meta.apiKeyDetected ? "status ok" : "status danger"}>
-            {meta.apiKeyDetected ? "RIOT_API_KEY 감지됨" : "RIOT_API_KEY 없음"}
-          </span>
-          <p>
-            {meta.region} · {meta.platform} · queue {meta.queueId}
-          </p>
+          <div className="server-environment" aria-label="서버 환경">
+            <span>{meta.region.toUpperCase()}</span>
+            <span>{meta.platform.toUpperCase()}</span>
+            <span>솔로 랭크 · {meta.queueId}</span>
+          </div>
           <div className="server-db-stats">
-            <p>
+            <div>
               <span>DB 매치</span>
               <strong>{meta.dbMatchCount.toLocaleString("ko-KR")}개</strong>
-            </p>
-            <p>
+            </div>
+            <div>
               <span>마지막 매치</span>
               <strong>{dbLastMatchText(meta.dbLastMatchCreation)}</strong>
-            </p>
+            </div>
           </div>
           <div className={`server-match-collection ${meta.autoRefresh.status}`}>
             <div className="server-collection-head">
-              <span>앱 시작 시 매치 수집</span>
+              <span>
+                <RefreshCw
+                  className={
+                    collectionStarting || meta.autoRefresh.status === "running"
+                      ? "spin"
+                      : ""
+                  }
+                  size={13}
+                />
+                자동 매치 수집
+              </span>
+              <em>{meta.autoRefresh.targetCount}명</em>
             </div>
             <p className="server-collection-scope">
               {playerMatchCollectionScope(meta)}
@@ -783,14 +813,7 @@ export default function App() {
               }
               title="설정된 유저의 매치를 지금 수집"
             >
-              <RefreshCw
-                className={
-                  collectionStarting || meta.autoRefresh.status === "running"
-                    ? "spin"
-                    : ""
-                }
-                size={13}
-              />
+              <RefreshCw size={13} />
               {collectionStarting || meta.autoRefresh.status === "running"
                 ? "수집 중"
                 : "지금 수집"}
@@ -832,7 +855,10 @@ export default function App() {
             )}
           </div>
           <div className="data-dragon-row">
-            <p>Data Dragon {meta.dataDragonVersion}</p>
+            <p>
+              <span>게임 데이터</span>
+              <strong>Data Dragon {meta.dataDragonVersion}</strong>
+            </p>
             <button
               className="icon-button compact"
               type="button"
@@ -1039,8 +1065,8 @@ function SearchWorkspace({
     <section className="screen">
       <WorkspaceHeader
         eyebrow="개별 유저 검색"
-        title="Riot ID 기준 매치업 검색"
-        description="최근 솔로 랭크에서 내가 고른 챔피언과 상대 라이너 조건이 맞는 경기만 찾습니다."
+        title="개별 유저 매치업 검색"
+        description="한 유저의 최근 솔로 랭크를 불러와 챔피언, 상대, 라인 조건에 맞는 경기만 찾아요."
       />
       <form
         className={`control-panel search-panel ${
@@ -1256,9 +1282,9 @@ function MultiCollectWorkspace({
   return (
     <section className="screen">
       <WorkspaceHeader
-        eyebrow="멀티서치"
-        title="여러 Riot ID 매치 수집"
-        description="직접 입력한 유저들의 솔로 랭크 match_cache를 저장하고 matchup_index에 반영합니다."
+        eyebrow="유저 매치 수집"
+        title="유저 매치 데이터 수집"
+        description="Riot ID를 입력해 분석에 사용할 최근 솔로 랭크 경기를 로컬 DB에 모아요."
       />
       <form className="control-panel multi" onSubmit={submit}>
         <div className="multi-riot-id-field">
@@ -1469,8 +1495,8 @@ function DbLookupWorkspace({
     <section className="screen">
       <WorkspaceHeader
         eyebrow="DB 조회"
-        title="matchup_index 빠른 조회"
-        description="로컬 DB 인덱스에서 메모 유저 또는 입력 유저의 매치업 통계와 목록을 확인합니다."
+        title="저장된 매치업 조회"
+        description="이미 수집된 경기에서 메모 유저 또는 입력한 유저의 매치업 통계와 목록을 빠르게 확인해요."
       />
       <form
         className={`control-panel db-panel ${
@@ -1973,7 +1999,7 @@ function WorkspaceHeader({
 }) {
   return (
     <header className="workspace-header">
-      <span>{eyebrow}</span>
+      <span className="workspace-eyebrow">{eyebrow}</span>
       <h1>{title}</h1>
       <p>{description}</p>
     </header>
