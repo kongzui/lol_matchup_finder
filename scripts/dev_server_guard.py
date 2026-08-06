@@ -1,7 +1,7 @@
-"""백엔드/프론트엔드 개발 서버 포트의 기존 프로세스를 정리한다.
+"""백엔드/프론트엔드 개발 서버에 사용할 포트를 선택한다.
 
 같은 프로젝트(lol_matchup_finder)의 기존 서버라면 자동으로 종료하고,
-다른 프로세스가 점유 중이면 안내 메시지를 출력한 뒤 비-0 코드로 종료한다.
+다른 프로세스가 점유 중이면 다음 사용 가능한 포트를 찾는다.
 """
 
 from __future__ import annotations
@@ -15,13 +15,9 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
-# 이 프로젝트의 개발 서버 프로세스를 식별하기 위한 커맨드라인 키워드.
-# - 프로젝트 절대 경로: vite/node 프로세스 식별 (모듈 경로가 cmd에 그대로 노출됨)
-# - src.api.main:app: uvicorn으로 띄운 백엔드 식별 (시스템 Python으로 띄워도 매칭됨)
-PROJECT_MARKERS: tuple[str, ...] = (
-    str(PROJECT_ROOT).lower(),
-    "src.api.main:app",
-)
+# 다른 프로젝트의 같은 모듈 이름을 오인하지 않도록 프로젝트 절대 경로만 사용한다.
+# 배치 파일은 백엔드 Python도 절대 경로로 실행해 커맨드라인에 이 값을 남긴다.
+PROJECT_MARKERS: tuple[str, ...] = (str(PROJECT_ROOT).lower(),)
 
 BIND_HOST = "127.0.0.1"
 BACKEND_PORT = 8000
@@ -30,8 +26,8 @@ PORT_FREE_TIMEOUT_SEC = 3.0
 
 
 def log(message: str) -> None:
-    """배치 파일에서 그대로 보이도록 stdout에 메시지를 출력한다."""
-    print(message, flush=True)
+    """포트 결과와 섞이지 않도록 안내 메시지를 stderr에 출력한다."""
+    print(message, file=sys.stderr, flush=True)
 
 
 def is_port_listening(host: str, port: int) -> bool:
@@ -116,53 +112,60 @@ def wait_until_port_free(port: int, timeout: float = PORT_FREE_TIMEOUT_SEC) -> b
     return not is_port_listening(BIND_HOST, port)
 
 
-def guard_port(label: str, port: int) -> int:
-    """단일 포트에 대해 동일 프로젝트면 종료, 외부 프로세스면 안내한다."""
-    if not is_port_listening(BIND_HOST, port):
-        return 0
+def select_port(label: str, preferred_port: int) -> int | None:
+    """선호 포트부터 확인해 실행 가능한 첫 포트를 반환한다."""
+    for port in range(preferred_port, 65536):
+        if not is_port_listening(BIND_HOST, port):
+            return port
 
-    pids = find_listening_pids(port)
-    if not pids:
-        log(
-            f"[{label}] {port} 포트가 열려 있지만 PID를 확인하지 못했습니다. 그대로 진행합니다."
-        )
-        return 0
+        pids = find_listening_pids(port)
+        if not pids:
+            log(f"[{label}] {port} 포트의 PID를 확인하지 못해 다음 포트를 확인합니다.")
+            continue
 
-    same_project: list[int] = []
-    foreign: list[tuple[int, str]] = []
-    for pid in pids:
-        command = get_process_command(pid)
-        if is_same_project(command):
-            same_project.append(pid)
-        else:
-            foreign.append((pid, command))
+        same_project: list[int] = []
+        foreign: list[tuple[int, str]] = []
+        for pid in pids:
+            command = get_process_command(pid)
+            if is_same_project(command):
+                same_project.append(pid)
+            else:
+                foreign.append((pid, command))
 
-    if foreign:
-        log(f"[{label}] {port} 포트를 다른 프로젝트의 프로세스가 사용 중입니다.")
-        for pid, command in foreign:
-            shown = command if command else "(커맨드라인을 읽을 수 없음)"
-            log(f"  - pid={pid} cmd={shown}")
-        log("  해당 프로세스를 직접 종료한 뒤 다시 실행해 주세요.")
-        return 1
+        if foreign:
+            log(
+                f"[{label}] {port} 포트를 다른 프로젝트가 사용해 다음 포트를 확인합니다."
+            )
+            for pid, command in foreign:
+                shown = command if command else "(커맨드라인을 읽을 수 없음)"
+                log(f"  - pid={pid} cmd={shown}")
+            continue
 
-    for pid in same_project:
-        log(f"[{label}] 같은 프로젝트의 기존 서버를 종료합니다 (pid={pid}).")
-        kill_process_tree(pid)
+        for pid in same_project:
+            log(f"[{label}] 같은 프로젝트의 기존 서버를 종료합니다 (pid={pid}).")
+            kill_process_tree(pid)
 
-    if not wait_until_port_free(port):
-        log(f"[{label}] {port} 포트가 비워지지 않았습니다. 잠시 후 다시 시도해 주세요.")
-        return 1
-    return 0
+        if wait_until_port_free(port):
+            return port
+        log(f"[{label}] {port} 포트가 비워지지 않아 다음 포트를 확인합니다.")
+
+    log(f"[{label}] 사용할 수 있는 포트를 찾지 못했습니다.")
+    return None
 
 
 def main() -> int:
-    """인자로 지정한 대상(backend / frontend / both)을 정리한다."""
+    """인자로 지정한 대상(backend / frontend / both)의 포트를 선택한다."""
     parser = argparse.ArgumentParser(description="개발 서버 포트 가드")
     parser.add_argument(
         "targets",
         nargs="+",
         choices=["backend", "frontend", "both"],
-        help="정리할 대상",
+        help="포트를 선택할 대상",
+    )
+    parser.add_argument(
+        "--print-env",
+        action="store_true",
+        help="배치 파일에서 읽을 수 있는 환경 변수 형식으로 결과 출력",
     )
     args = parser.parse_args()
 
@@ -173,12 +176,22 @@ def main() -> int:
         else:
             targets.add(value)
 
-    exit_code = 0
+    selected_ports: dict[str, int] = {}
     if "backend" in targets:
-        exit_code |= guard_port("backend", BACKEND_PORT)
+        port = select_port("backend", BACKEND_PORT)
+        if port is None:
+            return 1
+        selected_ports["BACKEND_PORT"] = port
     if "frontend" in targets:
-        exit_code |= guard_port("frontend", FRONTEND_PORT)
-    return exit_code
+        port = select_port("frontend", FRONTEND_PORT)
+        if port is None:
+            return 1
+        selected_ports["FRONTEND_PORT"] = port
+
+    if args.print_env:
+        for name, port in selected_ports.items():
+            print(f"{name}={port}")
+    return 0
 
 
 if __name__ == "__main__":

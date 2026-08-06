@@ -9,11 +9,16 @@ if not exist ".venv\Scripts\python.exe" (
 )
 
 chcp 65001 >nul
-".venv\Scripts\python.exe" -X utf8 scripts\dev_server_guard.py backend
-if errorlevel 1 (
+set "BACKEND_PORT="
+for /f "tokens=1,2 delims==" %%A in ('.venv\Scripts\python.exe -X utf8 scripts\dev_server_guard.py backend --print-env') do (
+    if /i "%%A"=="BACKEND_PORT" set "BACKEND_PORT=%%B"
+)
+if not defined BACKEND_PORT (
+    echo Failed to select a backend port.
     pause
     exit /b 1
 )
 
-start "lol-matchup-backend" cmd /k "cd /d %cd% && call .venv\Scripts\activate.bat && python -m uvicorn src.api.main:app --host 127.0.0.1 --port 8000 --reload"
+echo Starting FastAPI backend on http://127.0.0.1:%BACKEND_PORT%
+start "lol-matchup-backend" cmd /k "cd /d %cd% && call .venv\Scripts\activate.bat && %cd%\.venv\Scripts\python.exe -m uvicorn src.api.main:app --host 127.0.0.1 --port %BACKEND_PORT% --reload"
 exit /b 0
