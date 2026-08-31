@@ -216,7 +216,7 @@ def fetch_ranked_profile(
 ) -> tuple[dict[str, Any] | None, int, int]:
     """솔로 랭크 프로필을 가져오고 (profile, cache_hits, api_calls)를 반환한다."""
     cached = cache.get_ranked_profile(puuid, queue_id)
-    if cached is not None and cached.get("tier"):
+    if cached is not None:
         return cached, 1, 0
 
     try:
