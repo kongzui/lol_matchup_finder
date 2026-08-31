@@ -44,6 +44,31 @@ import type {
 type Workspace = "search" | "multi" | "db" | "memo" | "history";
 type DetailTab = "summary" | "build";
 
+type PlayerMemoState = {
+  items: PlayerMemo[];
+  loading: boolean;
+  error: string | null;
+  refresh: () => Promise<void>;
+};
+
+let initialPlayerMemosRequest: ReturnType<typeof api.listPlayerMemos> | null =
+  null;
+let initialMetaRequest: ReturnType<typeof api.getMeta> | null = null;
+
+function loadInitialMeta() {
+  if (!initialMetaRequest) {
+    initialMetaRequest = api.getMeta();
+  }
+  return initialMetaRequest;
+}
+
+function loadInitialPlayerMemos() {
+  if (!initialPlayerMemosRequest) {
+    initialPlayerMemosRequest = api.listPlayerMemos();
+  }
+  return initialPlayerMemosRequest;
+}
+
 const PAGE_SIZE = 50;
 const RIOT_ID_HISTORY_KEY = "lol-matchup-finder:riot-id-history";
 const LEGACY_MULTI_SEARCH_HISTORY_KEY =
@@ -484,6 +509,11 @@ function downloadBlob(blob: Blob, filename: string): void {
   URL.revokeObjectURL(url);
 }
 
+function dbSearchCriteriaKey(body: DbSearchBody): string {
+  const { page: _page, ...criteria } = body;
+  return JSON.stringify(criteria);
+}
+
 function useJobPoller(
   jobId: string | null,
   onDone: (status: JobStatus) => Promise<void>,
@@ -499,12 +529,16 @@ function useJobPoller(
     setJob(null);
     setError(null);
     let cancelled = false;
+    let retryCount = 0;
+    let timerId: number | null = null;
     const poll = async () => {
       try {
         const status = await api.getJob(jobId);
         if (cancelled) {
           return;
         }
+        retryCount = 0;
+        setError(null);
         setJob(status);
         if (status.status === "succeeded") {
           await onDone(status);
@@ -517,47 +551,32 @@ function useJobPoller(
           }
           return;
         }
-        window.setTimeout(poll, 900);
+        timerId = window.setTimeout(poll, 900);
       } catch (exc) {
         if (!cancelled) {
+          retryCount += 1;
+          const retryDelay = Math.min(1_000 * 2 ** (retryCount - 1), 10_000);
+          const reason =
+            exc instanceof Error ? exc.message : "job 조회에 실패했습니다.";
           setError(
-            exc instanceof Error ? exc.message : "job 조회에 실패했습니다.",
+            `작업 상태 연결이 잠시 끊겼어요. 서버 작업은 계속될 수 있어요. ${Math.ceil(
+              retryDelay / 1_000,
+            )}초 뒤 다시 연결해요. (${reason})`,
           );
+          timerId = window.setTimeout(poll, retryDelay);
         }
       }
     };
     poll();
     return () => {
       cancelled = true;
+      if (timerId !== null) {
+        window.clearTimeout(timerId);
+      }
     };
   }, [jobId]);
 
   return { job, error, setError };
-}
-
-function usePlayerMemoItems(): PlayerMemo[] {
-  const [items, setItems] = useState<PlayerMemo[]>([]);
-
-  useEffect(() => {
-    let cancelled = false;
-    api
-      .listPlayerMemos()
-      .then((payload) => {
-        if (!cancelled) {
-          setItems(payload.items);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setItems([]);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  return items;
 }
 
 export default function App() {
@@ -574,19 +593,133 @@ export default function App() {
   );
   const [metaRefreshing, setMetaRefreshing] = useState(false);
   const [metaRefreshError, setMetaRefreshError] = useState<string | null>(null);
+  const [sharedRefreshError, setSharedRefreshError] = useState<string | null>(
+    null,
+  );
   const [collectionStarting, setCollectionStarting] = useState(false);
   const [collectionStartError, setCollectionStartError] = useState<
     string | null
   >(null);
+  const [memoItems, setMemoItems] = useState<PlayerMemo[]>([]);
+  const [memosLoading, setMemosLoading] = useState(true);
+  const [memosError, setMemosError] = useState<string | null>(null);
+  const memoRequestSequence = useRef(0);
+  const metaRequestSequence = useRef(0);
+  const sharedRefreshPromise = useRef<Promise<void> | null>(null);
 
   useEffect(() => {
-    api
-      .getMeta()
-      .then(setMeta)
-      .catch((exc) =>
-        setError(exc instanceof Error ? exc.message : "메타데이터 로딩 실패"),
-      );
+    let cancelled = false;
+    const requestId = metaRequestSequence.current + 1;
+    metaRequestSequence.current = requestId;
+    loadInitialMeta()
+      .then((payload) => {
+        if (!cancelled && metaRequestSequence.current === requestId) {
+          setMeta(payload);
+        }
+      })
+      .catch((exc) => {
+        if (!cancelled && metaRequestSequence.current === requestId) {
+          setError(exc instanceof Error ? exc.message : "메타데이터 로딩 실패");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const requestId = memoRequestSequence.current + 1;
+    memoRequestSequence.current = requestId;
+    setMemosLoading(true);
+    setMemosError(null);
+    loadInitialPlayerMemos()
+      .then((payload) => {
+        if (!cancelled && memoRequestSequence.current === requestId) {
+          setMemoItems(payload.items);
+        }
+      })
+      .catch((exc) => {
+        if (!cancelled && memoRequestSequence.current === requestId) {
+          setMemosError(
+            exc instanceof Error ? exc.message : "메모 목록 조회 실패",
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled && memoRequestSequence.current === requestId) {
+          setMemosLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const refreshPlayerMemos = async () => {
+    const requestId = memoRequestSequence.current + 1;
+    memoRequestSequence.current = requestId;
+    setMemosLoading(true);
+    setMemosError(null);
+    try {
+      const payload = await api.listPlayerMemos();
+      if (memoRequestSequence.current === requestId) {
+        setMemoItems(payload.items);
+      }
+    } catch (exc) {
+      if (memoRequestSequence.current === requestId) {
+        setMemosError(
+          exc instanceof Error ? exc.message : "메모 목록 조회 실패",
+        );
+      }
+    } finally {
+      if (memoRequestSequence.current === requestId) {
+        setMemosLoading(false);
+      }
+    }
+  };
+
+  const refreshMetaAndMemos = (): Promise<void> => {
+    if (sharedRefreshPromise.current) {
+      return sharedRefreshPromise.current;
+    }
+
+    const requestId = metaRequestSequence.current + 1;
+    metaRequestSequence.current = requestId;
+    const request = (async () => {
+      const [metaResult] = await Promise.allSettled([
+        api.getMeta(),
+        refreshPlayerMemos(),
+      ]);
+      if (metaRequestSequence.current !== requestId) {
+        return;
+      }
+      if (metaResult.status === "fulfilled") {
+        setMeta(metaResult.value);
+        setSharedRefreshError(null);
+      } else {
+        setSharedRefreshError(
+          metaResult.reason instanceof Error
+            ? metaResult.reason.message
+            : "공용 데이터 현황 갱신 실패",
+        );
+      }
+    })();
+    sharedRefreshPromise.current = request;
+    void request.finally(() => {
+      if (sharedRefreshPromise.current === request) {
+        sharedRefreshPromise.current = null;
+      }
+    });
+    return request;
+  };
+
+  const playerMemos: PlayerMemoState = {
+    items: memoItems,
+    loading: memosLoading,
+    error: memosError,
+    refresh: refreshPlayerMemos,
+  };
 
   useEffect(() => {
     if (!meta?.latestSearchRiotId) {
@@ -629,10 +762,10 @@ export default function App() {
   const autoRefreshPoller = useJobPoller(
     autoRefreshJobId,
     async () => {
-      setMeta(await api.getMeta());
+      await refreshMetaAndMemos();
     },
     async () => {
-      setMeta(await api.getMeta());
+      await refreshMetaAndMemos();
     },
   );
 
@@ -657,7 +790,13 @@ export default function App() {
     autoRefreshPoller.setError(null);
     try {
       await api.createPlayerMatchCollectionJob(confirmed);
-      setMeta(await api.getMeta());
+      const requestId = metaRequestSequence.current + 1;
+      metaRequestSequence.current = requestId;
+      const nextMeta = await api.getMeta();
+      if (metaRequestSequence.current === requestId) {
+        setMeta(nextMeta);
+        setSharedRefreshError(null);
+      }
     } catch (exc) {
       setCollectionStartError(
         exc instanceof Error ? exc.message : "매치 수집 시작 실패",
@@ -671,7 +810,12 @@ export default function App() {
     setMetaRefreshing(true);
     setMetaRefreshError(null);
     try {
-      setMeta(await api.refreshMeta());
+      const requestId = metaRequestSequence.current + 1;
+      metaRequestSequence.current = requestId;
+      const nextMeta = await api.refreshMeta();
+      if (metaRequestSequence.current === requestId) {
+        setMeta(nextMeta);
+      }
     } catch (exc) {
       setMetaRefreshError(
         exc instanceof Error ? exc.message : "Data Dragon 갱신 실패",
@@ -873,6 +1017,11 @@ export default function App() {
           {metaRefreshError && (
             <p className="server-error-text">{metaRefreshError}</p>
           )}
+          {sharedRefreshError && (
+            <p className="server-error-text">
+              경기 데이터 현황 갱신 실패: {sharedRefreshError}
+            </p>
+          )}
         </div>
       </aside>
 
@@ -880,6 +1029,8 @@ export default function App() {
         <div hidden={active !== "search"}>
           <SearchWorkspace
             meta={meta}
+            playerMemos={playerMemos}
+            onCollectionCompleted={refreshMetaAndMemos}
             riotIdHistory={riotIdHistory}
             setRiotIdHistory={setRiotIdHistory}
             enemyChampionHistory={enemyChampionHistory}
@@ -891,6 +1042,8 @@ export default function App() {
         <div hidden={active !== "multi"}>
           <MultiCollectWorkspace
             meta={meta}
+            playerMemos={playerMemos}
+            onCollectionCompleted={refreshMetaAndMemos}
             riotIdHistory={riotIdHistory}
             setRiotIdHistory={setRiotIdHistory}
           />
@@ -898,6 +1051,7 @@ export default function App() {
         <div hidden={active !== "db"}>
           <DbLookupWorkspace
             meta={meta}
+            playerMemos={playerMemos}
             riotIdHistory={riotIdHistory}
             setRiotIdHistory={setRiotIdHistory}
             enemyChampionHistory={enemyChampionHistory}
@@ -908,8 +1062,9 @@ export default function App() {
         </div>
         {active === "memo" && (
           <PlayerMemoWorkspace
+            playerMemos={playerMemos}
             onCollectionSettingsChanged={async () => {
-              setMeta(await api.getMeta());
+              await refreshMetaAndMemos();
             }}
           />
         )}
@@ -961,6 +1116,8 @@ function NavButton({
 
 function SearchWorkspace({
   meta,
+  playerMemos,
+  onCollectionCompleted,
   riotIdHistory,
   setRiotIdHistory,
   enemyChampionHistory,
@@ -969,6 +1126,8 @@ function SearchWorkspace({
   setMyChampionHistory,
 }: {
   meta: MetaOptions;
+  playerMemos: PlayerMemoState;
+  onCollectionCompleted: () => Promise<void>;
   riotIdHistory: string[];
   setRiotIdHistory: Dispatch<SetStateAction<string[]>>;
   enemyChampionHistory: string[];
@@ -993,12 +1152,33 @@ function SearchWorkspace({
   });
   const [jobId, setJobId] = useState<string | null>(null);
   const [payload, setPayload] = useState<SearchPayload | null>(null);
-  const memoItems = usePlayerMemoItems();
+  const [jobActive, setJobActive] = useState(false);
+  const jobActiveRef = useRef(false);
 
-  const poller = useJobPoller(jobId, async (status) => {
-    const result = await api.getJobResult(status.jobId);
-    setPayload(result.payload as SearchPayload);
-  });
+  const finishJob = () => {
+    jobActiveRef.current = false;
+    setJobActive(false);
+  };
+
+  const poller = useJobPoller(
+    jobId,
+    async (status) => {
+      try {
+        const result = await api.getJobResult(status.jobId);
+        setPayload(result.payload as SearchPayload);
+        await onCollectionCompleted();
+      } finally {
+        finishJob();
+      }
+    },
+    async () => {
+      try {
+        await onCollectionCompleted();
+      } finally {
+        finishJob();
+      }
+    },
+  );
 
   const rememberHistory = (riotIdRaw: string) => {
     const normalized = normalizeSingleRiotIdInput(riotIdRaw);
@@ -1051,14 +1231,26 @@ function SearchWorkspace({
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
+    if (jobActiveRef.current) {
+      return;
+    }
+    jobActiveRef.current = true;
+    setJobActive(true);
     setPayload(null);
     poller.setError(null);
     const nextBody = { ...body, riotIdRaw: rememberHistory(body.riotIdRaw) };
     rememberMyChampionHistory(nextBody.myChampionKorean);
     rememberEnemyChampionHistory(nextBody.enemyChampionKorean);
     setBody(nextBody);
-    const created = await api.createSearchJob(nextBody);
-    setJobId(created.jobId);
+    try {
+      const created = await api.createSearchJob(nextBody);
+      setJobId(created.jobId);
+    } catch (exc) {
+      finishJob();
+      poller.setError(
+        exc instanceof Error ? exc.message : "검색 작업 시작에 실패했습니다.",
+      );
+    }
   };
 
   return (
@@ -1086,7 +1278,7 @@ function SearchWorkspace({
               placeholder="Hide on bush#KR1"
             />
           </label>
-          <MemoPlayerSelect items={memoItems} onPick={applyMemoItem} />
+          <MemoPlayerSelect state={playerMemos} onPick={applyMemoItem} />
         </div>
         <div className="my-champion-field">
           <ChampionSelect
@@ -1151,9 +1343,13 @@ function SearchWorkspace({
             />
           </div>
         )}
-        <button className="primary-action search-submit-action" type="submit">
+        <button
+          className="primary-action search-submit-action"
+          type="submit"
+          disabled={jobActive}
+        >
           <Search size={18} />
-          검색 실행
+          {jobActive ? "검색 중" : "검색 실행"}
         </button>
         <RecentRiotIdSearches
           className="search-riot-history"
@@ -1174,12 +1370,17 @@ function SearchWorkspace({
               },
             ]}
             memos={payload.memos}
-            onSaved={(puuid, memo) =>
-              setPayload({
-                ...payload,
-                memos: { ...payload.memos, [puuid]: memo },
-              })
-            }
+            onSaved={async (puuid, memo) => {
+              setPayload((current) =>
+                current
+                  ? {
+                      ...current,
+                      memos: { ...current.memos, [puuid]: memo },
+                    }
+                  : current,
+              );
+              await playerMemos.refresh();
+            }}
           />
           <div className="toolbar">
             <a className="tool-button" href={searchCsvUrl(jobId || "")}>
@@ -1202,10 +1403,14 @@ function SearchWorkspace({
 
 function MultiCollectWorkspace({
   meta,
+  playerMemos,
+  onCollectionCompleted,
   riotIdHistory,
   setRiotIdHistory,
 }: {
   meta: MetaOptions;
+  playerMemos: PlayerMemoState;
+  onCollectionCompleted: () => Promise<void>;
   riotIdHistory: string[];
   setRiotIdHistory: Dispatch<SetStateAction<string[]>>;
 }) {
@@ -1217,13 +1422,37 @@ function MultiCollectWorkspace({
   });
   const [jobId, setJobId] = useState<string | null>(null);
   const [payload, setPayload] = useState<MultiSearchPayload | null>(null);
-  const memoItems = usePlayerMemoItems();
-  const memoGroups = useMemo(() => groupPlayerMemos(memoItems), [memoItems]);
+  const [jobActive, setJobActive] = useState(false);
+  const jobActiveRef = useRef(false);
 
-  const poller = useJobPoller(jobId, async (status) => {
-    const result = await api.getJobResult(status.jobId);
-    setPayload(result.payload as MultiSearchPayload);
-  });
+  const finishJob = () => {
+    jobActiveRef.current = false;
+    setJobActive(false);
+  };
+  const memoGroups = useMemo(
+    () => groupPlayerMemos(playerMemos.items),
+    [playerMemos.items],
+  );
+
+  const poller = useJobPoller(
+    jobId,
+    async (status) => {
+      try {
+        const result = await api.getJobResult(status.jobId);
+        setPayload(result.payload as MultiSearchPayload);
+        await onCollectionCompleted();
+      } finally {
+        finishJob();
+      }
+    },
+    async () => {
+      try {
+        await onCollectionCompleted();
+      } finally {
+        finishJob();
+      }
+    },
+  );
 
   const rememberHistory = (riotIdsRaw: string) => {
     const normalized = normalizeRiotIdInput(riotIdsRaw);
@@ -1271,12 +1500,24 @@ function MultiCollectWorkspace({
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
+    if (jobActiveRef.current) {
+      return;
+    }
+    jobActiveRef.current = true;
+    setJobActive(true);
     setPayload(null);
     poller.setError(null);
     const nextBody = { ...body, riotIdsRaw: rememberHistory(body.riotIdsRaw) };
     setBody(nextBody);
-    const created = await api.createMultiSearchJob(nextBody);
-    setJobId(created.jobId);
+    try {
+      const created = await api.createMultiSearchJob(nextBody);
+      setJobId(created.jobId);
+    } catch (exc) {
+      finishJob();
+      poller.setError(
+        exc instanceof Error ? exc.message : "수집 작업 시작에 실패했습니다.",
+      );
+    }
   };
 
   return (
@@ -1300,7 +1541,11 @@ function MultiCollectWorkspace({
             />
           </label>
         </div>
-        <MemoGroupSelect groups={memoGroups} onPick={applyMemoGroup} />
+        <MemoGroupSelect
+          groups={memoGroups}
+          state={playerMemos}
+          onPick={applyMemoGroup}
+        />
         <div className="multi-options">
           <SelectField
             label="수집 기간"
@@ -1319,9 +1564,13 @@ function MultiCollectWorkspace({
             }
           />
         </div>
-        <button className="primary-action multi-submit-action" type="submit">
+        <button
+          className="primary-action multi-submit-action"
+          type="submit"
+          disabled={jobActive}
+        >
           <UploadCloud size={18} />
-          수집 실행
+          {jobActive ? "수집 중" : "수집 실행"}
         </button>
         <RecentRiotIdSearches
           className="multi-riot-history"
@@ -1336,12 +1585,17 @@ function MultiCollectWorkspace({
           <MissingMemoPanel
             candidates={payload.resolved_users}
             memos={payload.memos}
-            onSaved={(puuid, memo) =>
-              setPayload({
-                ...payload,
-                memos: { ...payload.memos, [puuid]: memo },
-              })
-            }
+            onSaved={async (puuid, memo) => {
+              setPayload((current) =>
+                current
+                  ? {
+                      ...current,
+                      memos: { ...current.memos, [puuid]: memo },
+                    }
+                  : current,
+              );
+              await playerMemos.refresh();
+            }}
           />
         </>
       )}
@@ -1351,6 +1605,7 @@ function MultiCollectWorkspace({
 
 function DbLookupWorkspace({
   meta,
+  playerMemos,
   riotIdHistory,
   setRiotIdHistory,
   enemyChampionHistory,
@@ -1359,6 +1614,7 @@ function DbLookupWorkspace({
   setMyChampionHistory,
 }: {
   meta: MetaOptions;
+  playerMemos: PlayerMemoState;
   riotIdHistory: string[];
   setRiotIdHistory: Dispatch<SetStateAction<string[]>>;
   enemyChampionHistory: string[];
@@ -1384,16 +1640,38 @@ function DbLookupWorkspace({
     pageSize: PAGE_SIZE,
   });
   const [payload, setPayload] = useState<DbSearchPayload | null>(null);
+  const [appliedBody, setAppliedBody] = useState<DbSearchBody | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const memoItems = usePlayerMemoItems();
-  const memoGroups = useMemo(() => groupPlayerMemos(memoItems), [memoItems]);
+  const [searching, setSearching] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const requestSequence = useRef(0);
+  const memoGroups = useMemo(
+    () => groupPlayerMemos(playerMemos.items),
+    [playerMemos.items],
+  );
 
-  const runSearch = async (nextBody = body) => {
+  const runSearch = async (nextBody: DbSearchBody) => {
+    const requestId = requestSequence.current + 1;
+    requestSequence.current = requestId;
     setError(null);
+    setSearching(true);
     try {
-      setPayload(await api.dbSearch(nextBody));
+      const nextPayload = await api.dbSearch(nextBody);
+      if (requestSequence.current !== requestId) {
+        return;
+      }
+      setPayload(nextPayload);
+      setAppliedBody(nextBody);
     } catch (exc) {
-      setError(exc instanceof Error ? exc.message : "DB 조회에 실패했습니다.");
+      if (requestSequence.current === requestId) {
+        setError(
+          exc instanceof Error ? exc.message : "DB 조회에 실패했습니다.",
+        );
+      }
+    } finally {
+      if (requestSequence.current === requestId) {
+        setSearching(false);
+      }
     }
   };
 
@@ -1465,6 +1743,9 @@ function DbLookupWorkspace({
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
+    if (searching) {
+      return;
+    }
     const nextBody = {
       ...body,
       riotIdsRaw: rememberRiotIdHistory(body.riotIdsRaw),
@@ -1473,23 +1754,38 @@ function DbLookupWorkspace({
     rememberMyChampionHistory(nextBody);
     rememberEnemyChampionHistory(nextBody);
     setBody(nextBody);
-    runSearch(nextBody);
+    void runSearch(nextBody);
   };
 
   const movePage = (page: number) => {
-    const nextBody = { ...body, page };
-    setBody(nextBody);
-    runSearch(nextBody);
+    if (!appliedBody || searching) {
+      return;
+    }
+    void runSearch({ ...appliedBody, page });
   };
 
   const exportCsv = async () => {
-    const blob = await api.exportDbSearch(body);
-    downloadBlob(blob, "db_matchup_results.csv");
+    if (!appliedBody || exporting) {
+      return;
+    }
+    setExporting(true);
+    setError(null);
+    try {
+      const blob = await api.exportDbSearch(appliedBody);
+      downloadBlob(blob, "db_matchup_results.csv");
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : "CSV 다운로드 실패");
+    } finally {
+      setExporting(false);
+    }
   };
 
   const pageCount = payload
-    ? Math.max(Math.ceil(payload.total / PAGE_SIZE), 1)
+    ? Math.max(Math.ceil(payload.total / payload.pageSize), 1)
     : 1;
+  const hasUnappliedChanges =
+    appliedBody !== null &&
+    dbSearchCriteriaKey(body) !== dbSearchCriteriaKey(appliedBody);
 
   return (
     <section className="screen">
@@ -1516,7 +1812,11 @@ function DbLookupWorkspace({
               placeholder={"비우면 메모 유저만\nHide on bush#KR1, Keria#KR1"}
             />
           </label>
-          <MemoGroupSelect groups={memoGroups} onPick={applyMemoGroup} />
+          <MemoGroupSelect
+            groups={memoGroups}
+            state={playerMemos}
+            onPick={applyMemoGroup}
+          />
         </div>
         <div className="my-champion-field">
           <ChampionSelect
@@ -1586,9 +1886,13 @@ function DbLookupWorkspace({
             />
             <span>이번 패치만</span>
           </label>
-          <button className="primary-action db-submit-action" type="submit">
+          <button
+            className="primary-action db-submit-action"
+            type="submit"
+            disabled={searching}
+          >
             <Database size={18} />
-            DB 조회 실행
+            {searching ? "조회 중" : "DB 조회 실행"}
           </button>
         </div>
         <RecentRiotIdSearches
@@ -1599,27 +1903,38 @@ function DbLookupWorkspace({
       </form>
 
       {error && <div className="error-box">{error}</div>}
+      {hasUnappliedChanges && (
+        <div className="db-filter-notice" role="status">
+          조건을 바꿨어요. 아래 결과와 CSV는 마지막으로 조회한 조건을 그대로
+          사용해요. 새 조건을 보려면 DB 조회를 다시 실행해 주세요.
+        </div>
+      )}
       {payload && (
         <>
           <DbSummary payload={payload} />
           <div className="toolbar">
-            <button className="tool-button" onClick={exportCsv}>
+            <button
+              className="tool-button"
+              type="button"
+              onClick={exportCsv}
+              disabled={exporting || searching}
+            >
               <Download size={16} />
-              CSV 다운로드
+              {exporting ? "CSV 준비 중" : "CSV 다운로드"}
             </button>
             <div className="pager">
               <button
-                disabled={body.page <= 1}
-                onClick={() => movePage(body.page - 1)}
+                disabled={payload.page <= 1 || searching}
+                onClick={() => movePage(payload.page - 1)}
               >
                 <ChevronLeft size={16} />
               </button>
               <span>
-                {body.page} / {pageCount}
+                {payload.page} / {pageCount}
               </span>
               <button
-                disabled={body.page >= pageCount}
-                onClick={() => movePage(body.page + 1)}
+                disabled={payload.page >= pageCount || searching}
+                onClick={() => movePage(payload.page + 1)}
               >
                 <ChevronRight size={16} />
               </button>
@@ -1639,11 +1954,13 @@ function DbLookupWorkspace({
 }
 
 function PlayerMemoWorkspace({
+  playerMemos,
   onCollectionSettingsChanged,
 }: {
+  playerMemos: PlayerMemoState;
   onCollectionSettingsChanged: () => Promise<void>;
 }) {
-  const [items, setItems] = useState<PlayerMemo[]>([]);
+  const items = playerMemos.items;
   const [riotIdRaw, setRiotIdRaw] = useState("");
   const [memo, setMemo] = useState("");
   const [filter, setFilter] = useState("");
@@ -1651,21 +1968,6 @@ function PlayerMemoWorkspace({
   const [editingPuuid, setEditingPuuid] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-
-  const loadMemos = async () => {
-    const payload = await api.listPlayerMemos();
-    setItems(payload.items);
-    setEditing(
-      Object.fromEntries(payload.items.map((item) => [item.puuid, item.memo])),
-    );
-    setEditingPuuid(null);
-  };
-
-  useEffect(() => {
-    loadMemos().catch((exc) =>
-      setError(exc instanceof Error ? exc.message : "메모 목록 조회 실패"),
-    );
-  }, []);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -1676,7 +1978,7 @@ function PlayerMemoWorkspace({
       await api.upsertPlayerMemo(target.puuid, memo);
       setRiotIdRaw("");
       setMemo("");
-      await loadMemos();
+      await playerMemos.refresh();
     } catch (exc) {
       setError(exc instanceof Error ? exc.message : "메모 저장 실패");
     } finally {
@@ -1688,8 +1990,11 @@ function PlayerMemoWorkspace({
     setSaving(true);
     setError(null);
     try {
-      await api.upsertPlayerMemo(item.puuid, editing[item.puuid] || "");
-      await loadMemos();
+      const nextMemo = editing[item.puuid] || "";
+      await api.upsertPlayerMemo(item.puuid, nextMemo);
+      setEditing({ ...editing, [item.puuid]: nextMemo });
+      setEditingPuuid(null);
+      await playerMemos.refresh();
     } catch (exc) {
       setError(exc instanceof Error ? exc.message : "메모 저장 실패");
     } finally {
@@ -1702,7 +2007,6 @@ function PlayerMemoWorkspace({
     setError(null);
     try {
       await api.updatePlayerMemoAutoRefresh(item.puuid, enabled);
-      await loadMemos();
       await onCollectionSettingsChanged();
     } catch (exc) {
       setError(
@@ -1736,7 +2040,6 @@ function PlayerMemoWorkspace({
     setError(null);
     try {
       await api.deletePlayerMemo(item.puuid);
-      await loadMemos();
       await onCollectionSettingsChanged();
     } catch (exc) {
       setError(exc instanceof Error ? exc.message : "메모 삭제 실패");
@@ -1787,11 +2090,29 @@ function PlayerMemoWorkspace({
         </button>
       </form>
       {error && <div className="error-box">{error}</div>}
+      {playerMemos.error && (
+        <div className="error-box memo-load-error">
+          <span>메모 목록을 불러오지 못했어요. {playerMemos.error}</span>
+          <button
+            className="tool-button"
+            type="button"
+            onClick={() => void playerMemos.refresh()}
+            disabled={playerMemos.loading}
+          >
+            <RefreshCw size={16} />
+            다시 불러오기
+          </button>
+        </div>
+      )}
       <section className="memo-panel">
         <div className="memo-panel-head">
           <div>
             <span>등록된 메모</span>
-            <strong>{items.length}명</strong>
+            <strong>
+              {playerMemos.loading && items.length === 0
+                ? "불러오는 중"
+                : `${items.length}명`}
+            </strong>
           </div>
           <label className="field">
             <span>검색</span>
@@ -1802,9 +2123,18 @@ function PlayerMemoWorkspace({
             />
           </label>
         </div>
-        {filteredItems.length === 0 ? (
+        {playerMemos.loading && items.length === 0 ? (
           <div className="empty compact">
-            <strong>등록된 메모가 없습니다.</strong>
+            <strong>메모 목록을 불러오는 중이에요.</strong>
+          </div>
+        ) : playerMemos.error &&
+          items.length === 0 ? null : filteredItems.length === 0 ? (
+          <div className="empty compact">
+            <strong>
+              {items.length === 0
+                ? "등록된 메모가 없습니다."
+                : "검색 조건에 맞는 메모가 없습니다."}
+            </strong>
           </div>
         ) : (
           <div className="memo-list">
@@ -1922,7 +2252,7 @@ function MissingMemoPanel({
 }: {
   candidates: MemoTarget[];
   memos: Record<string, string>;
-  onSaved: (puuid: string, memo: string) => void;
+  onSaved: (puuid: string, memo: string) => Promise<void> | void;
 }) {
   const missing = candidates.filter((candidate) => !memos[candidate.puuid]);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
@@ -1943,7 +2273,7 @@ function MissingMemoPanel({
     setError(null);
     try {
       await api.upsertPlayerMemo(candidate.puuid, memo);
-      onSaved(candidate.puuid, memo);
+      await onSaved(candidate.puuid, memo);
     } catch (exc) {
       setError(exc instanceof Error ? exc.message : "메모 저장 실패");
     } finally {
@@ -2007,12 +2337,13 @@ function WorkspaceHeader({
 }
 
 function MemoPlayerSelect({
-  items,
+  state,
   onPick,
 }: {
-  items: PlayerMemo[];
+  state: PlayerMemoState;
   onPick: (item: PlayerMemo) => void;
 }) {
+  const { items, loading, error } = state;
   return (
     <label className="field memo-select-field">
       <span>메모된 유저</span>
@@ -2026,10 +2357,17 @@ function MemoPlayerSelect({
             onPick(item);
           }
         }}
-        disabled={items.length === 0}
+        disabled={loading || items.length === 0}
+        title={error || undefined}
       >
         <option value="">
-          {items.length ? "메모에서 선택" : "등록된 메모 없음"}
+          {loading
+            ? "메모 불러오는 중"
+            : error
+              ? "메모 불러오기 실패"
+              : items.length
+                ? "메모에서 선택"
+                : "등록된 메모 없음"}
         </option>
         {items.map((item) => (
           <option value={item.puuid} key={item.puuid}>
@@ -2043,9 +2381,11 @@ function MemoPlayerSelect({
 
 function MemoGroupSelect({
   groups,
+  state,
   onPick,
 }: {
   groups: ReturnType<typeof groupPlayerMemos>;
+  state: PlayerMemoState;
   onPick: (items: PlayerMemo[], separator?: "line" | "comma") => void;
 }) {
   const allItems = groups.flatMap((group) => group.items);
@@ -2066,10 +2406,17 @@ function MemoGroupSelect({
             onPick(group.items);
           }
         }}
-        disabled={groups.length === 0}
+        disabled={state.loading || groups.length === 0}
+        title={state.error || undefined}
       >
         <option value="">
-          {groups.length ? "메모에서 선택" : "등록된 메모 없음"}
+          {state.loading
+            ? "메모 불러오는 중"
+            : state.error
+              ? "메모 불러오기 실패"
+              : groups.length
+                ? "메모에서 선택"
+                : "등록된 메모 없음"}
         </option>
         {groups.length > 0 && <option value="all">전체</option>}
         {groups.map((group, index) => (
