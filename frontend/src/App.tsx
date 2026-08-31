@@ -21,7 +21,12 @@ import {
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, ReactNode, SetStateAction } from "react";
-import { api, searchCsvUrl } from "./api";
+import { api, ApiError } from "./api";
+import {
+  useJobCenter,
+  type InterruptedJob,
+  type JobConnectionState,
+} from "./useJobCenter";
 import type {
   DbSearchBody,
   DbSearchPayload,
@@ -53,11 +58,11 @@ type PlayerMemoState = {
 
 let initialPlayerMemosRequest: ReturnType<typeof api.listPlayerMemos> | null =
   null;
-let initialMetaRequest: ReturnType<typeof api.getMeta> | null = null;
+let initialMetaRequest: ReturnType<typeof api.startup> | null = null;
 
 function loadInitialMeta() {
   if (!initialMetaRequest) {
-    initialMetaRequest = api.getMeta();
+    initialMetaRequest = api.startup();
   }
   return initialMetaRequest;
 }
@@ -89,13 +94,20 @@ const LANE_ORDER: Record<string, number> = {
 };
 
 function todayText(): string {
-  return new Date().toISOString().slice(0, 10);
+  return localDateText(new Date());
 }
 
 function daysAgoText(days: number): string {
   const date = new Date();
   date.setDate(date.getDate() - days);
-  return date.toISOString().slice(0, 10);
+  return localDateText(date);
+}
+
+function localDateText(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function matchDate(row: MatchRow): Date | null {
@@ -177,8 +189,8 @@ function dbLastMatchText(timestamp?: number | null): string {
 
 function playerMatchCollectionSummary(meta: MetaOptions): string {
   const refresh = meta.autoRefresh;
-  if (refresh.status === "running" && refresh.targetCount) {
-    return `${refresh.targetCount}명 매치 수집 중`;
+  if (refresh.status === "running" && refresh.plannedTargetCount) {
+    return `${refresh.plannedTargetCount}명 매치 수집 중`;
   }
   return refresh.message;
 }
@@ -187,7 +199,10 @@ function playerMatchCollectionScope(meta: MetaOptions): string {
   const lastCollected = meta.autoRefresh.lastCollectedAt
     ? memoDate(meta.autoRefresh.lastCollectedAt)
     : "기록 없음";
-  return `대상 ${meta.autoRefresh.targetCount}명 · 마지막 수집 ${lastCollected}`;
+  const planned = meta.autoRefresh.plannedTargetCount
+    ? ` · 이번 대상 ${meta.autoRefresh.plannedTargetCount}명`
+    : "";
+  return `설정 ${meta.autoRefresh.targetCount}명${planned} · 가장 최근 완료 ${lastCollected}`;
 }
 
 function matchPatchVersion(row: MatchRow): string | null {
@@ -294,9 +309,7 @@ function compactRiotIdHistory(values: string[]): string[] {
       }
     }
   }
-  return compacted.sort((a, b) =>
-    a.localeCompare(b, "ko-KR", { sensitivity: "base" }),
-  );
+  return compacted;
 }
 
 function readStoredRiotIdHistory(key: string): string[] {
@@ -349,7 +362,7 @@ function compactEnemyChampionHistory(
       break;
     }
   }
-  return compacted.sort((a, b) => a.localeCompare(b, "ko-KR"));
+  return compacted;
 }
 
 function loadEnemyChampionHistory(): string[] {
@@ -470,6 +483,22 @@ function playerMemoName(item: PlayerMemo): string {
   );
 }
 
+function playerCollectionStatus(item: PlayerMemo): string {
+  const completedAt = item.last_collected_at
+    ? ` · 마지막 완료 ${memoDate(item.last_collected_at)}`
+    : "";
+  if (item.collection_status === "current") {
+    return `경기 데이터 최신${completedAt}`;
+  }
+  if (item.collection_status === "continuation_needed") {
+    return `다음 수집에서 이어받기${completedAt}`;
+  }
+  if (item.collection_status === "needs_collection") {
+    return `경기 수집 필요${completedAt}`;
+  }
+  return "아직 경기 수집 안 함";
+}
+
 function groupPlayerMemos(items: PlayerMemo[]) {
   const groups = new Map<string, PlayerMemo[]>();
   for (const item of items) {
@@ -510,77 +539,94 @@ function downloadBlob(blob: Blob, filename: string): void {
 }
 
 function dbSearchCriteriaKey(body: DbSearchBody): string {
-  const { page: _page, ...criteria } = body;
+  const { page: _page, snapshot: _snapshot, ...criteria } = body;
   return JSON.stringify(criteria);
 }
 
-function useJobPoller(
-  jobId: string | null,
-  onDone: (status: JobStatus) => Promise<void>,
-  onFailed?: (status: JobStatus) => Promise<void>,
+function useJobCompletion(
+  job: JobStatus | null,
+  onDone: (status: JobStatus, isCurrent: () => boolean) => Promise<void>,
+  onFailed?: (status: JobStatus, isCurrent: () => boolean) => Promise<void>,
 ) {
-  const [job, setJob] = useState<JobStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const completionSequence = useRef(0);
+  const onDoneRef = useRef(onDone);
+  const onFailedRef = useRef(onFailed);
+  onDoneRef.current = onDone;
+  onFailedRef.current = onFailed;
 
   useEffect(() => {
-    if (!jobId) {
+    if (!job) {
       return;
     }
-    setJob(null);
+    if (job.status === "queued" || job.status === "running") {
+      setError(null);
+      return;
+    }
     setError(null);
-    let cancelled = false;
+    const sequence = completionSequence.current + 1;
+    completionSequence.current = sequence;
+    let retryTimer: number | null = null;
     let retryCount = 0;
-    let timerId: number | null = null;
-    const poll = async () => {
+    const isCurrent = () => completionSequence.current === sequence;
+    const complete = async () => {
       try {
-        const status = await api.getJob(jobId);
-        if (cancelled) {
-          return;
-        }
-        retryCount = 0;
-        setError(null);
-        setJob(status);
-        if (status.status === "succeeded") {
-          await onDone(status);
-          return;
-        }
-        if (status.status === "failed") {
-          setError(status.error || "작업에 실패했습니다.");
-          if (onFailed) {
-            await onFailed(status);
+        if (job.status === "failed" && !job.resultAvailable) {
+          if (!isCurrent()) {
+            return;
           }
-          return;
+          setError(job.error || "작업에 실패했습니다.");
+          if (onFailedRef.current) {
+            await onFailedRef.current(job, isCurrent);
+          }
+        } else {
+          await onDoneRef.current(job, isCurrent);
+          if (isCurrent()) {
+            setError(null);
+          }
         }
-        timerId = window.setTimeout(poll, 900);
       } catch (exc) {
-        if (!cancelled) {
+        if (isCurrent()) {
+          if (exc instanceof ApiError && [404, 410].includes(exc.status)) {
+            setError(
+              "서버가 다시 시작되어 이 작업 결과는 더 이상 열 수 없어요. 이미 저장을 마친 경기는 내 컴퓨터에 남아 있어요.",
+            );
+            if (onFailedRef.current) {
+              await onFailedRef.current(job, isCurrent);
+            }
+            return;
+          }
           retryCount += 1;
           const retryDelay = Math.min(1_000 * 2 ** (retryCount - 1), 10_000);
           const reason =
-            exc instanceof Error ? exc.message : "job 조회에 실패했습니다.";
+            exc instanceof Error ? exc.message : "작업 결과 조회 실패";
           setError(
-            `작업 상태 연결이 잠시 끊겼어요. 서버 작업은 계속될 수 있어요. ${Math.ceil(
+            `작업은 끝났지만 결과 화면 연결이 잠시 끊겼어요. ${Math.ceil(
               retryDelay / 1_000,
-            )}초 뒤 다시 연결해요. (${reason})`,
+            )}초 뒤 다시 불러와요. (${reason})`,
           );
-          timerId = window.setTimeout(poll, retryDelay);
+          retryTimer = window.setTimeout(complete, retryDelay);
         }
       }
     };
-    poll();
+    void complete();
     return () => {
-      cancelled = true;
-      if (timerId !== null) {
-        window.clearTimeout(timerId);
+      if (completionSequence.current === sequence) {
+        completionSequence.current += 1;
+      }
+      if (retryTimer !== null) {
+        window.clearTimeout(retryTimer);
       }
     };
-  }, [jobId]);
+  }, [job?.error, job?.jobId, job?.resultAvailable, job?.status]);
 
-  return { job, error, setError };
+  return { error, setError };
 }
 
 export default function App() {
+  const jobCenter = useJobCenter();
   const [meta, setMeta] = useState<MetaOptions | null>(null);
+  const [startupAttempt, setStartupAttempt] = useState(0);
   const [active, setActive] = useState<Workspace>("db");
   const [error, setError] = useState<string | null>(null);
   const [riotIdHistory, setRiotIdHistory] =
@@ -603,9 +649,16 @@ export default function App() {
   const [memoItems, setMemoItems] = useState<PlayerMemo[]>([]);
   const [memosLoading, setMemosLoading] = useState(true);
   const [memosError, setMemosError] = useState<string | null>(null);
+  const [recoveryRequest, setRecoveryRequest] = useState({
+    jobId: null as string | null,
+    sequence: 0,
+  });
   const memoRequestSequence = useRef(0);
   const metaRequestSequence = useRef(0);
   const sharedRefreshPromise = useRef<Promise<void> | null>(null);
+  const terminalJobsSeen = useRef<Set<string>>(new Set());
+  const terminalJobsInitialized = useRef(false);
+  const interruptedJobsSeen = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     let cancelled = false;
@@ -625,7 +678,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [startupAttempt]);
 
   useEffect(() => {
     let cancelled = false;
@@ -654,7 +707,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [startupAttempt]);
 
   const refreshPlayerMemos = async () => {
     const requestId = memoRequestSequence.current + 1;
@@ -722,6 +775,53 @@ export default function App() {
   };
 
   useEffect(() => {
+    if (!meta || jobCenter.connectionState !== "connected") {
+      return;
+    }
+    if (!terminalJobsInitialized.current) {
+      terminalJobsInitialized.current = true;
+      terminalJobsSeen.current = new Set(
+        jobCenter.recentJobs.map((job) => job.jobId),
+      );
+      if (jobCenter.recentJobs.length > 0) {
+        void refreshMetaAndMemos();
+      }
+      return;
+    }
+
+    const newlyFinished = jobCenter.recentJobs.filter(
+      (job) => !terminalJobsSeen.current.has(job.jobId),
+    );
+    for (const job of newlyFinished) {
+      terminalJobsSeen.current.add(job.jobId);
+    }
+    if (newlyFinished.length > 0) {
+      void refreshMetaAndMemos();
+    }
+  }, [jobCenter.connectionState, jobCenter.recentJobs, meta]);
+
+  useEffect(() => {
+    if (!meta) {
+      return;
+    }
+    const newlyInterrupted = jobCenter.interruptedJobs.filter(
+      (job) => !interruptedJobsSeen.current.has(job.jobId),
+    );
+    for (const job of newlyInterrupted) {
+      interruptedJobsSeen.current.add(job.jobId);
+    }
+    if (newlyInterrupted.length > 0) {
+      void refreshMetaAndMemos();
+    }
+  }, [jobCenter.interruptedJobs, meta]);
+
+  useEffect(() => {
+    if (meta?.autoRefresh.status === "running") {
+      void jobCenter.refresh();
+    }
+  }, [meta?.autoRefresh.jobId, meta?.autoRefresh.status]);
+
+  useEffect(() => {
     if (!meta?.latestSearchRiotId) {
       return;
     }
@@ -757,17 +857,26 @@ export default function App() {
     });
   }, [meta]);
 
-  const autoRefreshJobId =
-    meta?.autoRefresh.status === "running" ? meta.autoRefresh.jobId : null;
-  const autoRefreshPoller = useJobPoller(
-    autoRefreshJobId,
-    async () => {
-      await refreshMetaAndMemos();
-    },
-    async () => {
-      await refreshMetaAndMemos();
-    },
+  const autoRefreshJob = jobCenter.jobs.find(
+    (job) => job.jobId === meta?.autoRefresh.jobId,
   );
+  const selectedRecoveryJob = jobCenter.jobs.find(
+    (job) => job.jobId === recoveryRequest.jobId,
+  );
+  const searchRecoveryJob =
+    selectedRecoveryJob?.kind === "search"
+      ? selectedRecoveryJob
+      : jobCenter.activeJobs.find((job) => job.kind === "search");
+  const multiRecoveryJob =
+    selectedRecoveryJob && isMultiCollectionJob(selectedRecoveryJob)
+      ? selectedRecoveryJob
+      : jobCenter.activeJobs.find(isMultiCollectionJob);
+  const searchRecoveryRequestSequence =
+    selectedRecoveryJob?.kind === "search" ? recoveryRequest.sequence : 0;
+  const multiRecoveryRequestSequence =
+    selectedRecoveryJob && isMultiCollectionJob(selectedRecoveryJob)
+      ? recoveryRequest.sequence
+      : 0;
 
   const startPlayerMatchCollection = async () => {
     if (!meta) {
@@ -778,7 +887,7 @@ export default function App() {
     let confirmed = false;
     if (refresh.requiresConfirmation) {
       confirmed = window.confirm(
-        `최근 ${refresh.days}일, 최대 ${refresh.matchesPerPlayer}판씩 수집할까요?`,
+        `이번에 필요한 ${refresh.plannedTargetCount}명을 사람마다 최근 최대 ${refresh.days}일, 최대 ${refresh.matchesPerPlayer}판씩 수집할까요?`,
       );
       if (!confirmed) {
         return;
@@ -787,9 +896,9 @@ export default function App() {
 
     setCollectionStarting(true);
     setCollectionStartError(null);
-    autoRefreshPoller.setError(null);
     try {
       await api.createPlayerMatchCollectionJob(confirmed);
+      await jobCenter.refresh();
       const requestId = metaRequestSequence.current + 1;
       metaRequestSequence.current = requestId;
       const nextMeta = await api.getMeta();
@@ -818,7 +927,7 @@ export default function App() {
       }
     } catch (exc) {
       setMetaRefreshError(
-        exc instanceof Error ? exc.message : "Data Dragon 갱신 실패",
+        exc instanceof Error ? exc.message : "게임 정보 갱신 실패",
       );
     } finally {
       setMetaRefreshing(false);
@@ -826,11 +935,26 @@ export default function App() {
   };
 
   if (error) {
-    return <FatalError message={error} />;
+    return (
+      <FatalError
+        message={error}
+        onRetry={() => {
+          initialMetaRequest = null;
+          initialPlayerMemosRequest = null;
+          setError(null);
+          setMeta(null);
+          setStartupAttempt((current) => current + 1);
+        }}
+      />
+    );
   }
 
   if (!meta) {
-    return <div className="boot">메타데이터를 불러오는 중...</div>;
+    return (
+      <div className="boot">
+        게임 정보를 확인하고 관심 유저의 자동 수집 필요 여부를 살펴보는 중...
+      </div>
+    );
   }
 
   return (
@@ -841,7 +965,7 @@ export default function App() {
             MF
           </div>
           <div className="brand-copy">
-            <span>LOCAL MATCH DATA</span>
+            <span>내 컴퓨터의 경기</span>
             <strong>Matchup Finder</strong>
           </div>
         </div>
@@ -851,7 +975,7 @@ export default function App() {
             <NavButton
               active={active === "db"}
               icon={<Database size={18} />}
-              label="DB 조회"
+              label="저장된 매치업"
               onClick={() => setActive("db")}
             />
             <NavButton
@@ -863,7 +987,7 @@ export default function App() {
             <NavButton
               active={active === "multi"}
               icon={<UploadCloud size={18} />}
-              label="유저 매치 수집"
+              label="새 데이터 가져오기"
               onClick={() => setActive("multi")}
             />
           </div>
@@ -872,7 +996,7 @@ export default function App() {
             <NavButton
               active={active === "memo"}
               icon={<StickyNote size={18} />}
-              label="유저 메모"
+              label="관심 유저"
               onClick={() => setActive("memo")}
             />
             <NavButton
@@ -892,7 +1016,9 @@ export default function App() {
               <div>
                 <span>시스템 상태</span>
                 <strong>
-                  {meta.apiKeyDetected ? "검색 준비 완료" : "API 설정 필요"}
+                  {meta.apiKeyDetected
+                    ? "새 데이터 수집 가능"
+                    : "저장된 데이터만 조회 가능"}
                 </strong>
               </div>
             </div>
@@ -900,7 +1026,7 @@ export default function App() {
               className={meta.apiKeyDetected ? "status ok" : "status danger"}
             >
               <i aria-hidden="true" />
-              {meta.apiKeyDetected ? "준비됨" : "확인 필요"}
+              {meta.apiKeyDetected ? "준비됨" : "API 키 없음"}
             </span>
           </div>
           <div className="server-environment" aria-label="서버 환경">
@@ -910,12 +1036,17 @@ export default function App() {
           </div>
           <div className="server-db-stats">
             <div>
-              <span>DB 매치</span>
-              <strong>{meta.dbMatchCount.toLocaleString("ko-KR")}개</strong>
+              <span>저장된 경기</span>
+              <strong>
+                {meta.dbIndexedMatchCount.toLocaleString("ko-KR")}개 조회 가능
+              </strong>
+              <small>원본 {meta.dbMatchCount.toLocaleString("ko-KR")}개</small>
             </div>
             <div>
-              <span>마지막 매치</span>
-              <strong>{dbLastMatchText(meta.dbLastMatchCreation)}</strong>
+              <span>마지막 조회 가능 경기</span>
+              <strong>
+                {dbLastMatchText(meta.dbLastIndexedMatchCreation)}
+              </strong>
             </div>
           </div>
           <div className={`server-match-collection ${meta.autoRefresh.status}`}>
@@ -941,8 +1072,10 @@ export default function App() {
             </strong>
             {meta.autoRefresh.requiresConfirmation && (
               <p className="server-collection-confirmation">
-                지금 수집을 누르면 최근 {meta.autoRefresh.days}일 · 최대{" "}
-                {meta.autoRefresh.matchesPerPlayer}판씩 수집할지 확인해요.
+                이번에 필요한 {meta.autoRefresh.plannedTargetCount}명 중 오래
+                확인하지 않은 사람이 있어요. 지금 수집을 누르면 사람마다 최근
+                최대 {meta.autoRefresh.days}일 · 최대{" "}
+                {meta.autoRefresh.matchesPerPlayer}판을 확인해요.
               </p>
             )}
             <button
@@ -970,15 +1103,18 @@ export default function App() {
                   {meta.autoRefresh.matchesPerPlayer}판
                 </em>
               )}
-            {autoRefreshPoller.job && meta.autoRefresh.status === "running" && (
+            {autoRefreshJob && meta.autoRefresh.status === "running" && (
               <em>
-                {Math.round(autoRefreshPoller.job.progress * 100)}% ·{" "}
-                {autoRefreshPoller.job.message || "진행 중"}
+                {Math.round(autoRefreshJob.progress * 100)}% ·{" "}
+                {autoRefreshJob.message || "진행 중"}
               </em>
             )}
-            {autoRefreshPoller.error && (
-              <em className="server-error-text">{autoRefreshPoller.error}</em>
-            )}
+            {jobCenter.connectionMessage &&
+              meta.autoRefresh.status === "running" && (
+                <em className="server-error-text">
+                  {jobCenter.connectionMessage}
+                </em>
+              )}
             {collectionStartError && (
               <em className="server-error-text">{collectionStartError}</em>
             )}
@@ -998,18 +1134,36 @@ export default function App() {
               </details>
             )}
           </div>
+          <JobCenterPanel
+            activeJobs={jobCenter.activeJobs}
+            recentJobs={jobCenter.recentJobs}
+            interruptedJobs={jobCenter.interruptedJobs}
+            connectionState={jobCenter.connectionState}
+            connectionMessage={jobCenter.connectionMessage}
+            onOpen={(job) => {
+              setRecoveryRequest((current) => ({
+                jobId: job.jobId,
+                sequence: current.sequence + 1,
+              }));
+              if (job.kind === "search") {
+                setActive("search");
+              } else if (isMultiCollectionJob(job)) {
+                setActive("multi");
+              }
+            }}
+          />
           <div className="data-dragon-row">
             <p>
-              <span>게임 데이터</span>
-              <strong>Data Dragon {meta.dataDragonVersion}</strong>
+              <span>게임 정보 버전</span>
+              <strong>게임 정보 {meta.dataDragonVersion}</strong>
             </p>
             <button
               className="icon-button compact"
               type="button"
               onClick={refreshMeta}
               disabled={metaRefreshing}
-              title="Data Dragon 갱신"
-              aria-label="Data Dragon 갱신"
+              title="게임 정보 갱신"
+              aria-label="게임 정보 갱신"
             >
               <RefreshCw className={metaRefreshing ? "spin" : ""} size={14} />
             </button>
@@ -1031,6 +1185,12 @@ export default function App() {
             meta={meta}
             playerMemos={playerMemos}
             onCollectionCompleted={refreshMetaAndMemos}
+            recoveryJob={searchRecoveryJob || null}
+            recoveryRequestSequence={searchRecoveryRequestSequence}
+            jobs={jobCenter.jobs}
+            interruptedJobs={jobCenter.interruptedJobs}
+            jobCenterReady={jobCenter.connectionState === "connected"}
+            onJobCreated={jobCenter.refresh}
             riotIdHistory={riotIdHistory}
             setRiotIdHistory={setRiotIdHistory}
             enemyChampionHistory={enemyChampionHistory}
@@ -1044,6 +1204,12 @@ export default function App() {
             meta={meta}
             playerMemos={playerMemos}
             onCollectionCompleted={refreshMetaAndMemos}
+            recoveryJob={multiRecoveryJob || null}
+            recoveryRequestSequence={multiRecoveryRequestSequence}
+            jobs={jobCenter.jobs}
+            interruptedJobs={jobCenter.interruptedJobs}
+            jobCenterReady={jobCenter.connectionState === "connected"}
+            onJobCreated={jobCenter.refresh}
             riotIdHistory={riotIdHistory}
             setRiotIdHistory={setRiotIdHistory}
           />
@@ -1083,11 +1249,20 @@ export default function App() {
   );
 }
 
-function FatalError({ message }: { message: string }) {
+function FatalError({
+  message,
+  onRetry,
+}: {
+  message: string;
+  onRetry: () => void;
+}) {
   return (
     <div className="fatal">
       <strong>앱을 시작할 수 없습니다.</strong>
       <p>{message}</p>
+      <button className="primary-action" type="button" onClick={onRetry}>
+        시작 준비 다시 시도
+      </button>
     </div>
   );
 }
@@ -1114,10 +1289,136 @@ function NavButton({
   );
 }
 
+function jobStatusText(status: JobStatus["status"]): string {
+  if (status === "queued") return "준비 중";
+  if (status === "running") return "진행 중";
+  if (status === "succeeded") return "완료";
+  if (status === "partial") return "일부 확인 필요";
+  return "실패";
+}
+
+function isMultiCollectionJob(job: Pick<JobStatus, "kind">): boolean {
+  return job.kind === "multi-search" || job.kind === "player-match-collection";
+}
+
+function JobCenterPanel({
+  activeJobs,
+  recentJobs,
+  interruptedJobs,
+  connectionState,
+  connectionMessage,
+  onOpen,
+}: {
+  activeJobs: JobStatus[];
+  recentJobs: JobStatus[];
+  interruptedJobs: InterruptedJob[];
+  connectionState: JobConnectionState;
+  connectionMessage: string | null;
+  onOpen: (job: JobStatus) => void;
+}) {
+  const [showAllRecent, setShowAllRecent] = useState(false);
+  const visibleRecent = showAllRecent ? recentJobs : recentJobs.slice(0, 3);
+  return (
+    <section className="job-center">
+      <p className="sr-only" role="status" aria-live="polite">
+        {recentJobs[0]
+          ? `${recentJobs[0].title} ${jobStatusText(recentJobs[0].status)}`
+          : ""}
+      </p>
+      <div className="job-center-head">
+        <span>경기 데이터 작업</span>
+        <strong>
+          {activeJobs.length ? `${activeJobs.length}개 진행 중` : "대기"}
+        </strong>
+      </div>
+      {connectionState === "loading" && <p>작업 기록을 확인하고 있어요.</p>}
+      {connectionState === "reconnecting" && (
+        <p className="server-error-text">
+          {connectionMessage || "서버 작업에 다시 연결하고 있어요."}
+        </p>
+      )}
+      {interruptedJobs.map((job) => (
+        <div className="job-center-item interrupted" key={`old-${job.jobId}`}>
+          <div>
+            <strong>{job.title}</strong>
+            <span>{job.targetSummary}</span>
+          </div>
+          <em>중단됨 · 최종 상태 확인 불가</em>
+          <p>서버는 바뀌었지만 이미 저장을 마친 경기는 남아 있어요.</p>
+        </div>
+      ))}
+      {activeJobs.map((job) => (
+        <div className="job-center-item running" key={job.jobId}>
+          <div>
+            <strong>{job.title}</strong>
+            <span>{job.targetSummary}</span>
+          </div>
+          <em
+            role="progressbar"
+            aria-label={`${job.title} 진행률`}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={Math.round(job.progress * 100)}
+          >
+            {Math.round(job.progress * 100)}% · {job.message || "진행 중"}
+          </em>
+          {(job.kind === "search" || isMultiCollectionJob(job)) && (
+            <button type="button" onClick={() => onOpen(job)}>
+              이어보기
+            </button>
+          )}
+        </div>
+      ))}
+      {visibleRecent.map((job) => (
+        <div className={`job-center-item ${job.status}`} key={job.jobId}>
+          <div>
+            <strong>{job.title}</strong>
+            <span>{job.targetSummary}</span>
+          </div>
+          <em>
+            {jobStatusText(job.status)} · {job.message}
+          </em>
+          {job.status === "failed" && job.error && (
+            <p className="server-error-text">{job.error}</p>
+          )}
+          {job.resultAvailable &&
+            (job.kind === "search" || isMultiCollectionJob(job)) && (
+              <button type="button" onClick={() => onOpen(job)}>
+                결과 보기
+              </button>
+            )}
+        </div>
+      ))}
+      {recentJobs.length > 3 && (
+        <button
+          className="tool-button"
+          type="button"
+          aria-expanded={showAllRecent}
+          onClick={() => setShowAllRecent((current) => !current)}
+        >
+          {showAllRecent
+            ? "최근 작업 접기"
+            : `최근 작업 ${recentJobs.length}개 모두 보기`}
+        </button>
+      )}
+      {connectionState === "connected" &&
+        activeJobs.length === 0 &&
+        visibleRecent.length === 0 &&
+        interruptedJobs.length === 0 && <p>아직 실행한 작업이 없어요.</p>}
+    </section>
+  );
+}
+
 function SearchWorkspace({
   meta,
   playerMemos,
   onCollectionCompleted,
+  recoveryJob,
+  recoveryRequestSequence,
+  jobs,
+  interruptedJobs,
+  jobCenterReady,
+  onJobCreated,
   riotIdHistory,
   setRiotIdHistory,
   enemyChampionHistory,
@@ -1128,6 +1429,12 @@ function SearchWorkspace({
   meta: MetaOptions;
   playerMemos: PlayerMemoState;
   onCollectionCompleted: () => Promise<void>;
+  recoveryJob: JobStatus | null;
+  recoveryRequestSequence: number;
+  jobs: JobStatus[];
+  interruptedJobs: InterruptedJob[];
+  jobCenterReady: boolean;
+  onJobCreated: () => Promise<void>;
   riotIdHistory: string[];
   setRiotIdHistory: Dispatch<SetStateAction<string[]>>;
   enemyChampionHistory: string[];
@@ -1151,34 +1458,115 @@ function SearchWorkspace({
     maxMatches: 100,
   });
   const [jobId, setJobId] = useState<string | null>(null);
+  const [resultJobId, setResultJobId] = useState<string | null>(null);
   const [payload, setPayload] = useState<SearchPayload | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const exportRequestSequence = useRef(0);
   const [jobActive, setJobActive] = useState(false);
   const jobActiveRef = useRef(false);
+  const pendingRecoveryJobIdRef = useRef<string | null>(null);
+  const observedJobIdsRef = useRef<Set<string>>(new Set());
 
-  const finishJob = () => {
-    jobActiveRef.current = false;
-    setJobActive(false);
+  const activateJob = (nextJobId: string) => {
+    jobActiveRef.current = true;
+    setJobActive(true);
+    exportRequestSequence.current += 1;
+    setExporting(false);
+    setResultJobId(null);
+    setExportError(null);
+    setPayload(null);
+    setJobId(nextJobId);
   };
 
-  const poller = useJobPoller(
-    jobId,
-    async (status) => {
-      try {
-        const result = await api.getJobResult(status.jobId);
-        setPayload(result.payload as SearchPayload);
-        await onCollectionCompleted();
-      } finally {
+  const finishJob = () => {
+    const pendingJobId = pendingRecoveryJobIdRef.current;
+    pendingRecoveryJobIdRef.current = null;
+    if (pendingJobId) {
+      activateJob(pendingJobId);
+      return;
+    }
+    jobActiveRef.current = false;
+    setJobActive(false);
+    setJobId(null);
+  };
+
+  const trackedJob = jobs.find((job) => job.jobId === jobId) || null;
+  const completion = useJobCompletion(
+    trackedJob,
+    async (status, isCurrent) => {
+      const result = await api.getJobResult(status.jobId);
+      if (!isCurrent()) {
+        return;
+      }
+      setResultJobId(status.jobId);
+      setPayload(result.payload as SearchPayload);
+      await onCollectionCompleted();
+      if (isCurrent()) {
         finishJob();
       }
     },
-    async () => {
+    async (_status, isCurrent) => {
       try {
         await onCollectionCompleted();
       } finally {
-        finishJob();
+        if (isCurrent()) {
+          finishJob();
+        }
       }
     },
   );
+
+  useEffect(() => {
+    const nextJobId = recoveryJob?.jobId;
+    if (!nextJobId) {
+      return;
+    }
+    if (nextJobId === jobId) {
+      pendingRecoveryJobIdRef.current = null;
+      return;
+    }
+    if (jobActiveRef.current || !jobCenterReady) {
+      pendingRecoveryJobIdRef.current = nextJobId;
+      return;
+    }
+    pendingRecoveryJobIdRef.current = null;
+    completion.setError(null);
+    activateJob(nextJobId);
+  }, [recoveryJob?.jobId, recoveryRequestSequence]);
+
+  useEffect(() => {
+    const pendingJobId = pendingRecoveryJobIdRef.current;
+    if (!jobCenterReady || jobActiveRef.current || !pendingJobId) {
+      return;
+    }
+    pendingRecoveryJobIdRef.current = null;
+    completion.setError(null);
+    activateJob(pendingJobId);
+  }, [jobCenterReady]);
+
+  useEffect(() => {
+    if (jobId && trackedJob) {
+      observedJobIdsRef.current.add(jobId);
+    }
+  }, [jobId, trackedJob]);
+
+  useEffect(() => {
+    if (!jobId) {
+      return;
+    }
+    const interrupted = interruptedJobs.some((job) => job.jobId === jobId);
+    const disappeared =
+      observedJobIdsRef.current.has(jobId) && trackedJob === null;
+    if (!interrupted && !disappeared) {
+      return;
+    }
+    completion.setError(
+      "서버가 다시 시작되어 이 작업의 마지막 상태는 확인할 수 없어요. 이미 저장을 마친 경기는 내 컴퓨터에 남아 있어요.",
+    );
+    finishJob();
+    void onCollectionCompleted();
+  }, [interruptedJobs, jobId, trackedJob]);
 
   const rememberHistory = (riotIdRaw: string) => {
     const normalized = normalizeSingleRiotIdInput(riotIdRaw);
@@ -1231,13 +1619,17 @@ function SearchWorkspace({
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (jobActiveRef.current) {
+    if (jobActiveRef.current || !jobCenterReady) {
       return;
     }
     jobActiveRef.current = true;
     setJobActive(true);
+    exportRequestSequence.current += 1;
+    setExporting(false);
+    setResultJobId(null);
+    setExportError(null);
     setPayload(null);
-    poller.setError(null);
+    completion.setError(null);
     const nextBody = { ...body, riotIdRaw: rememberHistory(body.riotIdRaw) };
     rememberMyChampionHistory(nextBody.myChampionKorean);
     rememberEnemyChampionHistory(nextBody.enemyChampionKorean);
@@ -1245,11 +1637,39 @@ function SearchWorkspace({
     try {
       const created = await api.createSearchJob(nextBody);
       setJobId(created.jobId);
+      await onJobCreated();
     } catch (exc) {
       finishJob();
-      poller.setError(
+      completion.setError(
         exc instanceof Error ? exc.message : "검색 작업 시작에 실패했습니다.",
       );
+    }
+  };
+
+  const exportCsv = async () => {
+    if (!resultJobId || exporting) {
+      return;
+    }
+    const exportRequestId = exportRequestSequence.current + 1;
+    exportRequestSequence.current = exportRequestId;
+    setExporting(true);
+    setExportError(null);
+    try {
+      const result = await api.exportSearch(resultJobId);
+      if (exportRequestSequence.current !== exportRequestId) {
+        return;
+      }
+      downloadBlob(result.blob, result.filename);
+    } catch (exc) {
+      if (exportRequestSequence.current === exportRequestId) {
+        setExportError(
+          exc instanceof Error ? exc.message : "CSV 다운로드에 실패했습니다.",
+        );
+      }
+    } finally {
+      if (exportRequestSequence.current === exportRequestId) {
+        setExporting(false);
+      }
     }
   };
 
@@ -1346,10 +1766,14 @@ function SearchWorkspace({
         <button
           className="primary-action search-submit-action"
           type="submit"
-          disabled={jobActive}
+          disabled={jobActive || !jobCenterReady}
         >
           <Search size={18} />
-          {jobActive ? "검색 중" : "검색 실행"}
+          {!jobCenterReady
+            ? "기존 작업 확인 중"
+            : jobActive
+              ? "검색 중"
+              : "검색 실행"}
         </button>
         <RecentRiotIdSearches
           className="search-riot-history"
@@ -1358,7 +1782,7 @@ function SearchWorkspace({
         />
       </form>
 
-      <JobProgress job={poller.job} error={poller.error} />
+      <JobProgress job={trackedJob} error={completion.error} />
       {payload && (
         <>
           <SearchSummary payload={payload} />
@@ -1383,11 +1807,21 @@ function SearchWorkspace({
             }}
           />
           <div className="toolbar">
-            <a className="tool-button" href={searchCsvUrl(jobId || "")}>
+            <EnemyRiotIdsCopyButton
+              rows={payload.results}
+              labelPrefix="검색 결과"
+            />
+            <button
+              className="tool-button"
+              type="button"
+              onClick={() => void exportCsv()}
+              disabled={exporting}
+            >
               <Download size={16} />
-              CSV 다운로드
-            </a>
+              {exporting ? "CSV 만드는 중" : "CSV 다운로드"}
+            </button>
           </div>
+          {exportError && <div className="error-box">{exportError}</div>}
           <MatchResultList
             rows={payload.results}
             meta={meta}
@@ -1405,12 +1839,24 @@ function MultiCollectWorkspace({
   meta,
   playerMemos,
   onCollectionCompleted,
+  recoveryJob,
+  recoveryRequestSequence,
+  jobs,
+  interruptedJobs,
+  jobCenterReady,
+  onJobCreated,
   riotIdHistory,
   setRiotIdHistory,
 }: {
   meta: MetaOptions;
   playerMemos: PlayerMemoState;
   onCollectionCompleted: () => Promise<void>;
+  recoveryJob: JobStatus | null;
+  recoveryRequestSequence: number;
+  jobs: JobStatus[];
+  interruptedJobs: InterruptedJob[];
+  jobCenterReady: boolean;
+  onJobCreated: () => Promise<void>;
   riotIdHistory: string[];
   setRiotIdHistory: Dispatch<SetStateAction<string[]>>;
 }) {
@@ -1424,35 +1870,107 @@ function MultiCollectWorkspace({
   const [payload, setPayload] = useState<MultiSearchPayload | null>(null);
   const [jobActive, setJobActive] = useState(false);
   const jobActiveRef = useRef(false);
+  const pendingRecoveryJobIdRef = useRef<string | null>(null);
+  const observedJobIdsRef = useRef<Set<string>>(new Set());
+
+  const activateJob = (nextJobId: string) => {
+    jobActiveRef.current = true;
+    setJobActive(true);
+    setPayload(null);
+    setJobId(nextJobId);
+  };
 
   const finishJob = () => {
+    const pendingJobId = pendingRecoveryJobIdRef.current;
+    pendingRecoveryJobIdRef.current = null;
+    if (pendingJobId) {
+      activateJob(pendingJobId);
+      return;
+    }
     jobActiveRef.current = false;
     setJobActive(false);
+    setJobId(null);
   };
   const memoGroups = useMemo(
     () => groupPlayerMemos(playerMemos.items),
     [playerMemos.items],
   );
 
-  const poller = useJobPoller(
-    jobId,
-    async (status) => {
-      try {
-        const result = await api.getJobResult(status.jobId);
-        setPayload(result.payload as MultiSearchPayload);
-        await onCollectionCompleted();
-      } finally {
+  const trackedJob = jobs.find((job) => job.jobId === jobId) || null;
+  const completion = useJobCompletion(
+    trackedJob,
+    async (status, isCurrent) => {
+      const result = await api.getJobResult(status.jobId);
+      if (!isCurrent()) {
+        return;
+      }
+      setPayload(result.payload as MultiSearchPayload);
+      await onCollectionCompleted();
+      if (isCurrent()) {
         finishJob();
       }
     },
-    async () => {
+    async (_status, isCurrent) => {
       try {
         await onCollectionCompleted();
       } finally {
-        finishJob();
+        if (isCurrent()) {
+          finishJob();
+        }
       }
     },
   );
+
+  useEffect(() => {
+    const nextJobId = recoveryJob?.jobId;
+    if (!nextJobId) {
+      return;
+    }
+    if (nextJobId === jobId) {
+      pendingRecoveryJobIdRef.current = null;
+      return;
+    }
+    if (jobActiveRef.current || !jobCenterReady) {
+      pendingRecoveryJobIdRef.current = nextJobId;
+      return;
+    }
+    pendingRecoveryJobIdRef.current = null;
+    completion.setError(null);
+    activateJob(nextJobId);
+  }, [recoveryJob?.jobId, recoveryRequestSequence]);
+
+  useEffect(() => {
+    const pendingJobId = pendingRecoveryJobIdRef.current;
+    if (!jobCenterReady || jobActiveRef.current || !pendingJobId) {
+      return;
+    }
+    pendingRecoveryJobIdRef.current = null;
+    completion.setError(null);
+    activateJob(pendingJobId);
+  }, [jobCenterReady]);
+
+  useEffect(() => {
+    if (jobId && trackedJob) {
+      observedJobIdsRef.current.add(jobId);
+    }
+  }, [jobId, trackedJob]);
+
+  useEffect(() => {
+    if (!jobId) {
+      return;
+    }
+    const interrupted = interruptedJobs.some((job) => job.jobId === jobId);
+    const disappeared =
+      observedJobIdsRef.current.has(jobId) && trackedJob === null;
+    if (!interrupted && !disappeared) {
+      return;
+    }
+    completion.setError(
+      "서버가 다시 시작되어 이 작업의 마지막 상태는 확인할 수 없어요. 이미 저장을 마친 경기는 내 컴퓨터에 남아 있어요.",
+    );
+    finishJob();
+    void onCollectionCompleted();
+  }, [interruptedJobs, jobId, trackedJob]);
 
   const rememberHistory = (riotIdsRaw: string) => {
     const normalized = normalizeRiotIdInput(riotIdsRaw);
@@ -1500,21 +2018,22 @@ function MultiCollectWorkspace({
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (jobActiveRef.current) {
+    if (jobActiveRef.current || !jobCenterReady) {
       return;
     }
     jobActiveRef.current = true;
     setJobActive(true);
     setPayload(null);
-    poller.setError(null);
+    completion.setError(null);
     const nextBody = { ...body, riotIdsRaw: rememberHistory(body.riotIdsRaw) };
     setBody(nextBody);
     try {
       const created = await api.createMultiSearchJob(nextBody);
       setJobId(created.jobId);
+      await onJobCreated();
     } catch (exc) {
       finishJob();
-      poller.setError(
+      completion.setError(
         exc instanceof Error ? exc.message : "수집 작업 시작에 실패했습니다.",
       );
     }
@@ -1523,9 +2042,9 @@ function MultiCollectWorkspace({
   return (
     <section className="screen">
       <WorkspaceHeader
-        eyebrow="유저 매치 수집"
-        title="유저 매치 데이터 수집"
-        description="Riot ID를 입력해 분석에 사용할 최근 솔로 랭크 경기를 로컬 DB에 모아요."
+        eyebrow="새 데이터 가져오기"
+        title="여러 유저의 경기 가져오기"
+        description="Riot ID를 입력해 분석에 사용할 최근 솔로 랭크 경기를 내 컴퓨터에 모아요."
       />
       <form className="control-panel multi" onSubmit={submit}>
         <div className="multi-riot-id-field">
@@ -1567,10 +2086,14 @@ function MultiCollectWorkspace({
         <button
           className="primary-action multi-submit-action"
           type="submit"
-          disabled={jobActive}
+          disabled={jobActive || !jobCenterReady}
         >
           <UploadCloud size={18} />
-          {jobActive ? "수집 중" : "수집 실행"}
+          {!jobCenterReady
+            ? "기존 작업 확인 중"
+            : jobActive
+              ? "수집 중"
+              : "수집 실행"}
         </button>
         <RecentRiotIdSearches
           className="multi-riot-history"
@@ -1578,7 +2101,7 @@ function MultiCollectWorkspace({
           onPick={applyHistoryItem}
         />
       </form>
-      <JobProgress job={poller.job} error={poller.error} />
+      <JobProgress job={trackedJob} error={completion.error} />
       {payload && (
         <>
           <MultiSummary payload={payload} />
@@ -1644,7 +2167,10 @@ function DbLookupWorkspace({
   const [error, setError] = useState<string | null>(null);
   const [searching, setSearching] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [copyingAll, setCopyingAll] = useState(false);
+  const [copyAllMessage, setCopyAllMessage] = useState<string | null>(null);
   const requestSequence = useRef(0);
+  const copyRequestSequence = useRef(0);
   const memoGroups = useMemo(
     () => groupPlayerMemos(playerMemos.items),
     [playerMemos.items],
@@ -1653,7 +2179,10 @@ function DbLookupWorkspace({
   const runSearch = async (nextBody: DbSearchBody) => {
     const requestId = requestSequence.current + 1;
     requestSequence.current = requestId;
+    copyRequestSequence.current += 1;
     setError(null);
+    setCopyAllMessage(null);
+    setCopyingAll(false);
     setSearching(true);
     try {
       const nextPayload = await api.dbSearch(nextBody);
@@ -1661,11 +2190,13 @@ function DbLookupWorkspace({
         return;
       }
       setPayload(nextPayload);
-      setAppliedBody(nextBody);
+      setAppliedBody({ ...nextBody, snapshot: nextPayload.snapshot });
     } catch (exc) {
       if (requestSequence.current === requestId) {
         setError(
-          exc instanceof Error ? exc.message : "DB 조회에 실패했습니다.",
+          exc instanceof Error
+            ? exc.message
+            : "저장된 경기 조회에 실패했습니다.",
         );
       }
     } finally {
@@ -1780,17 +2311,56 @@ function DbLookupWorkspace({
     }
   };
 
+  const copyAllEnemyRiotIds = async () => {
+    if (!appliedBody || copyingAll) {
+      return;
+    }
+    const copyRequestId = copyRequestSequence.current + 1;
+    copyRequestSequence.current = copyRequestId;
+    setCopyingAll(true);
+    setCopyAllMessage(null);
+    try {
+      const response = await api.getDbEnemyRiotIds(appliedBody);
+      if (copyRequestSequence.current !== copyRequestId) {
+        return;
+      }
+      if (response.items.length === 0) {
+        setCopyAllMessage("복사할 상대 Riot ID가 없어요.");
+        return;
+      }
+      await navigator.clipboard.writeText(response.items.join("\n"));
+      if (copyRequestSequence.current !== copyRequestId) {
+        return;
+      }
+      setCopyAllMessage(
+        `전체 결과에서 ${response.items.length}명을 복사했어요.`,
+      );
+    } catch (exc) {
+      if (copyRequestSequence.current === copyRequestId) {
+        setCopyAllMessage(
+          exc instanceof Error ? exc.message : "상대 Riot ID 전체 복사 실패",
+        );
+      }
+    } finally {
+      if (copyRequestSequence.current === copyRequestId) {
+        setCopyingAll(false);
+      }
+    }
+  };
+
   const pageCount = payload
     ? Math.max(Math.ceil(payload.total / payload.pageSize), 1)
     : 1;
   const hasUnappliedChanges =
     appliedBody !== null &&
     dbSearchCriteriaKey(body) !== dbSearchCriteriaKey(appliedBody);
+  const hasNewStoredData =
+    payload !== null && meta.dbIndexMaxId > payload.snapshot.maxIndexId;
 
   return (
     <section className="screen">
       <WorkspaceHeader
-        eyebrow="DB 조회"
+        eyebrow="저장된 매치업"
         title="저장된 매치업 조회"
         description="이미 수집된 경기에서 메모 유저 또는 입력한 유저의 매치업 통계와 목록을 빠르게 확인해요."
       />
@@ -1809,7 +2379,7 @@ function DbLookupWorkspace({
               onChange={(event) =>
                 setBody({ ...body, riotIdsRaw: event.target.value })
               }
-              placeholder={"비우면 메모 유저만\nHide on bush#KR1, Keria#KR1"}
+              placeholder={"비우면 관심 유저만\nHide on bush#KR1, Keria#KR1"}
             />
           </label>
           <MemoGroupSelect
@@ -1892,7 +2462,7 @@ function DbLookupWorkspace({
             disabled={searching}
           >
             <Database size={18} />
-            {searching ? "조회 중" : "DB 조회 실행"}
+            {searching ? "조회 중" : "저장된 경기 조회"}
           </button>
         </div>
         <RecentRiotIdSearches
@@ -1903,16 +2473,56 @@ function DbLookupWorkspace({
       </form>
 
       {error && <div className="error-box">{error}</div>}
+      {!payload && !searching && meta.dbIndexedMatchCount === 0 && (
+        <div className="empty">
+          <strong>아직 조회할 수 있는 저장 경기가 없어요.</strong>
+          <p>
+            개별 유저 검색이나 새 데이터 가져오기에서 경기를 먼저 모아 주세요.
+          </p>
+        </div>
+      )}
       {hasUnappliedChanges && (
         <div className="db-filter-notice" role="status">
           조건을 바꿨어요. 아래 결과와 CSV는 마지막으로 조회한 조건을 그대로
-          사용해요. 새 조건을 보려면 DB 조회를 다시 실행해 주세요.
+          사용해요. 새 조건을 보려면 저장된 경기 조회를 다시 눌러 주세요.
+        </div>
+      )}
+      {hasNewStoredData && appliedBody && (
+        <div className="db-filter-notice" role="status">
+          <span>
+            새 경기 데이터가 들어왔어요. 지금 결과는 이전 조회 시점이에요.
+          </span>
+          <button
+            className="tool-button"
+            type="button"
+            disabled={searching}
+            onClick={() =>
+              void runSearch({
+                ...appliedBody,
+                page: 1,
+                snapshot: undefined,
+              })
+            }
+          >
+            <RefreshCw size={16} />
+            같은 조건 다시 조회
+          </button>
         </div>
       )}
       {payload && (
         <>
           <DbSummary payload={payload} />
           <div className="toolbar">
+            <button
+              className="tool-button"
+              type="button"
+              onClick={copyAllEnemyRiotIds}
+              disabled={copyingAll || searching}
+            >
+              <Copy size={16} />
+              {copyingAll ? "전체 결과 확인 중" : "전체 결과 상대 Riot ID 복사"}
+            </button>
+            {copyAllMessage && <span role="status">{copyAllMessage}</span>}
             <button
               className="tool-button"
               type="button"
@@ -1946,6 +2556,16 @@ function DbLookupWorkspace({
             showPlayerCopy
             clientPagination={false}
             memos={payload.memos}
+            emptyTitle={
+              payload.snapshot.targetPuuids.length === 0
+                ? "조회할 관심 유저가 없어요."
+                : "이 조건에 맞는 저장 경기가 없어요."
+            }
+            emptyDescription={
+              payload.snapshot.targetPuuids.length === 0
+                ? "관심 유저를 등록하거나 조회 유저 목록에 Riot ID를 입력해 주세요."
+                : "새 데이터를 가져오거나 기간·챔피언·라인 조건을 확인해 주세요."
+            }
           />
         </>
       )}
@@ -2033,7 +2653,13 @@ function PlayerMemoWorkspace({
       item.riot_id_tag_line || undefined,
       item.puuid,
     );
-    if (!window.confirm(`${name} 메모를 삭제할까요?`)) {
+    if (
+      !window.confirm(
+        `${name}을 관심 유저에서 삭제할까요?\n\n` +
+          "저장된 경기 데이터는 남지만, 저장된 매치업의 기본 조회 대상과 " +
+          "앱 시작 자동 수집 대상에서는 빠져요.",
+      )
+    ) {
       return;
     }
     setSaving(true);
@@ -2042,7 +2668,7 @@ function PlayerMemoWorkspace({
       await api.deletePlayerMemo(item.puuid);
       await onCollectionSettingsChanged();
     } catch (exc) {
-      setError(exc instanceof Error ? exc.message : "메모 삭제 실패");
+      setError(exc instanceof Error ? exc.message : "관심 유저 삭제 실패");
     } finally {
       setSaving(false);
     }
@@ -2063,9 +2689,9 @@ function PlayerMemoWorkspace({
   return (
     <section className="screen">
       <WorkspaceHeader
-        eyebrow="유저 메모"
+        eyebrow="관심 유저"
         title="관심 유저 관리"
-        description="DB 조회 기본 대상이 되는 메모 유저를 추가하고 관리합니다."
+        description="저장된 매치업의 기본 대상과 앱 시작 수집 대상을 관리해요. 메모는 비워도 괜찮아요."
       />
       <form className="memo-form" onSubmit={submit}>
         <label className="field">
@@ -2107,7 +2733,7 @@ function PlayerMemoWorkspace({
       <section className="memo-panel">
         <div className="memo-panel-head">
           <div>
-            <span>등록된 메모</span>
+            <span>등록된 관심 유저</span>
             <strong>
               {playerMemos.loading && items.length === 0
                 ? "불러오는 중"
@@ -2132,8 +2758,8 @@ function PlayerMemoWorkspace({
           <div className="empty compact">
             <strong>
               {items.length === 0
-                ? "등록된 메모가 없습니다."
-                : "검색 조건에 맞는 메모가 없습니다."}
+                ? "등록된 관심 유저가 없습니다."
+                : "검색 조건에 맞는 관심 유저가 없습니다."}
             </strong>
           </div>
         ) : (
@@ -2172,7 +2798,8 @@ function PlayerMemoWorkspace({
                           )}
                           <div className="memo-player">
                             <strong>{name}</strong>
-                            <span>수정 {memoDate(item.updated_at)}</span>
+                            <span>{playerCollectionStatus(item)}</span>
+                            <small>메모 수정 {memoDate(item.updated_at)}</small>
                           </div>
                           <div className="memo-actions">
                             <label className="memo-auto-refresh">
@@ -2224,7 +2851,7 @@ function PlayerMemoWorkspace({
                             <button
                               className="icon-button danger"
                               type="button"
-                              title="삭제"
+                              title="관심 유저 삭제"
                               onClick={() => deleteMemo(item)}
                               disabled={saving}
                             >
@@ -2254,7 +2881,10 @@ function MissingMemoPanel({
   memos: Record<string, string>;
   onSaved: (puuid: string, memo: string) => Promise<void> | void;
 }) {
-  const missing = candidates.filter((candidate) => !memos[candidate.puuid]);
+  const missing = candidates.filter(
+    (candidate) =>
+      !Object.prototype.hasOwnProperty.call(memos, candidate.puuid),
+  );
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [savingPuuid, setSavingPuuid] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -2757,7 +3387,12 @@ function JobProgress({
   if (error) {
     return <div className="error-box">{error}</div>;
   }
-  if (!job || job.status === "succeeded") {
+  if (
+    !job ||
+    job.status === "succeeded" ||
+    job.status === "partial" ||
+    job.status === "failed"
+  ) {
     return null;
   }
   return (
@@ -2766,7 +3401,14 @@ function JobProgress({
         <strong>{job.message || "작업 준비 중..."}</strong>
         <span>{Math.round(job.progress * 100)}%</span>
       </div>
-      <div className="progress-track">
+      <div
+        className="progress-track"
+        role="progressbar"
+        aria-label="현재 작업 진행률"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={Math.round(job.progress * 100)}
+      >
         <div style={{ width: `${Math.round(job.progress * 100)}%` }} />
       </div>
     </div>
@@ -2782,19 +3424,19 @@ function SearchSummary({ payload }: { payload: SearchPayload }) {
       title={`${payload.account.game_name}#${payload.account.tag_line}`}
       meta={`${payload.lane_label} · ${payload.period_kind}`}
       items={[
-        ["발견", `${total}`, "경기"],
+        ["조건에 맞는 경기", `${total}`, "경기"],
         [
           "승률",
           total ? `${((wins / total) * 100).toFixed(1)}%` : "-",
           `${wins}승 ${losses}패`,
         ],
-        ["스캔", `${payload.scanned_total}`, "매치"],
+        ["확인한 경기", `${payload.scanned_total}`, "경기"],
         [
-          "캐시/API",
+          "저장본 사용 / 외부 요청",
           `${payload.cache_hits} / ${payload.api_calls}`,
           payload.index_allowed
-            ? `DB ${payload.indexed_rows} row`
-            : `인덱스 제외 · ${payload.index_tier || "랭크 없음"}`,
+            ? `새로 저장한 조회 항목 ${payload.indexed_rows}개`
+            : `저장 대상 아님 · ${payload.index_tier || "랭크 없음"}`,
         ],
       ]}
     />
@@ -2805,21 +3447,21 @@ function MultiSummary({ payload }: { payload: MultiSearchPayload }) {
   return (
     <>
       <SummaryGrid
-        title={`${payload.input_count}명 입력 · ${payload.period_label}`}
-        meta={`1인당 최대 ${payload.matches_per_player}판`}
+        title={`${payload.resolved_users.length}명 확인 · ${payload.period_label}`}
+        meta={`${payload.input_count}개 입력 · 1인당 최대 ${payload.matches_per_player}판`}
         items={[
-          ["인덱스", `${payload.indexed_rows}`, "row"],
+          ["새로 저장한 조회 항목", `${payload.indexed_rows}`, "개"],
           [
-            "성공/실패",
+            "완료 / 확인 필요",
             `${payload.success_count} / ${payload.failure_count}`,
             "유저",
           ],
           [
-            "매치/API",
+            "찾은 경기 / 외부 요청",
             `${payload.discovered_matches} / ${payload.api_calls}`,
             `신규 상세 ${payload.new_match_details}`,
           ],
-          ["캐시", `${payload.cache_hits}`, "hit"],
+          ["저장본 사용", `${payload.cache_hits}`, "건"],
         ]}
       />
       {payload.failures.length > 0 && (
@@ -2845,7 +3487,7 @@ function DbSummary({ payload }: { payload: DbSearchPayload }) {
         payload.patch_prefix || "전체 패치"
       }`}
       items={[
-        ["발견", `${payload.stats.total}`, "경기"],
+        ["조건에 맞는 경기", `${payload.stats.total}`, "경기"],
         [
           "승률",
           payload.stats.winRate === null ? "-" : `${payload.stats.winRate}%`,
@@ -2853,9 +3495,11 @@ function DbSummary({ payload }: { payload: DbSearchPayload }) {
         ],
         ["대상", payload.target_label, `${payload.results.length} 표시 중`],
         [
-          "캐시/API",
-          `${payload.cache_hits} / ${payload.api_calls}`,
-          "PUUID 조회",
+          "로컬 유저 확인",
+          `${payload.cache_hits}`,
+          payload.api_calls === 0
+            ? "외부 요청 없음"
+            : `외부 요청 ${payload.api_calls}`,
         ],
       ]}
     />
@@ -2898,6 +3542,8 @@ function MatchResultList({
   showPlayerCopy,
   memos = {},
   clientPagination = true,
+  emptyTitle = "조건에 맞는 경기를 찾지 못했습니다.",
+  emptyDescription = "기간을 늘리거나 챔피언/라인 선택이 맞는지 확인해 주세요.",
 }: {
   rows: MatchRow[];
   meta: MetaOptions;
@@ -2905,6 +3551,8 @@ function MatchResultList({
   showPlayerCopy: boolean;
   memos?: Record<string, string>;
   clientPagination?: boolean;
+  emptyTitle?: string;
+  emptyDescription?: string;
 }) {
   const [openIds, setOpenIds] = useState<Set<string>>(new Set());
   const [page, setPage] = useState(1);
@@ -2926,8 +3574,8 @@ function MatchResultList({
   if (rows.length === 0) {
     return (
       <div className="empty">
-        <strong>조건에 맞는 경기를 찾지 못했습니다.</strong>
-        <p>기간을 늘리거나 챔피언/라인 선택이 맞는지 확인해 주세요.</p>
+        <strong>{emptyTitle}</strong>
+        <p>{emptyDescription}</p>
       </div>
     );
   }
@@ -3097,7 +3745,13 @@ function MatchResultCard({
         >
           <ExternalLink size={16} />
         </a>
-        <button className="icon-button" onClick={onToggle} title="매치 상세">
+        <button
+          className="icon-button"
+          type="button"
+          onClick={onToggle}
+          title="매치 상세 보기 · 저장되지 않은 타임라인이나 랭크 정보는 처음 한 번 새로 가져올 수 있어요."
+          aria-label="매치 상세 보기"
+        >
           {detailOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
         </button>
       </div>
@@ -3194,17 +3848,100 @@ function ChampionLoadout({ row, meta }: { row: MatchRow; meta: MetaOptions }) {
   );
 }
 
-function CopyButton({ value, label }: { value: string; label: string }) {
-  const [copied, setCopied] = useState(false);
+function CopyButton({
+  value,
+  label,
+  children,
+  className = "icon-button",
+}: {
+  value: string;
+  label: string;
+  children?: ReactNode;
+  className?: string;
+}) {
+  const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
+  const timer = useRef<number | null>(null);
+  useEffect(
+    () => () => {
+      if (timer.current !== null) {
+        window.clearTimeout(timer.current);
+      }
+    },
+    [],
+  );
   const copy = async () => {
-    await navigator.clipboard.writeText(value);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 900);
+    try {
+      await navigator.clipboard.writeText(value);
+      setState("copied");
+    } catch {
+      setState("failed");
+    }
+    if (timer.current !== null) {
+      window.clearTimeout(timer.current);
+    }
+    timer.current = window.setTimeout(() => setState("idle"), 1_500);
   };
+  const stateLabel =
+    state === "copied" ? "복사됨" : state === "failed" ? "복사 실패" : null;
   return (
-    <button className="icon-button" onClick={copy} title={label}>
-      {copied ? "OK" : <Copy size={16} />}
+    <button
+      className={className}
+      type="button"
+      onClick={copy}
+      title={stateLabel || label}
+      aria-label={stateLabel || label}
+    >
+      {stateLabel
+        ? children
+          ? stateLabel
+          : state === "copied"
+            ? "✓"
+            : "!"
+        : children || <Copy size={16} />}
     </button>
+  );
+}
+
+function EnemyRiotIdsCopyButton({
+  rows,
+  labelPrefix,
+}: {
+  rows: MatchRow[];
+  labelPrefix: string;
+}) {
+  const enemyIds = useMemo(() => {
+    const seen = new Set<string>();
+    const values: string[] = [];
+    for (const row of rows) {
+      const split = splitRiotId(row.enemy_riot_id);
+      const value = riotId(
+        row.enemy_game_name || split.name,
+        row.enemy_tag_line || split.tag,
+        row.enemy_riot_id,
+      );
+      const key = value.toLocaleLowerCase();
+      if (value === "-" || seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      values.push(value);
+    }
+    return values;
+  }, [rows]);
+
+  if (enemyIds.length === 0) {
+    return null;
+  }
+  const label = `${labelPrefix} 상대 Riot ID ${enemyIds.length}명 복사`;
+  return (
+    <CopyButton
+      value={enemyIds.join("\n")}
+      label={label}
+      className="tool-button"
+    >
+      <Copy size={16} />
+      {label}
+    </CopyButton>
   );
 }
 
@@ -3218,17 +3955,34 @@ function MatchDetailPanel({
   const [detail, setDetail] = useState<MatchDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<DetailTab>("build");
+  const [loadedDetailKey, setLoadedDetailKey] = useState<string | null>(null);
+  const [loadingPart, setLoadingPart] = useState<DetailTab | null>(null);
+  const [partErrors, setPartErrors] = useState<
+    Record<DetailTab, string | null>
+  >({ build: null, summary: null });
+  const [partApiCalls, setPartApiCalls] = useState<Record<DetailTab, number>>({
+    build: 0,
+    summary: 0,
+  });
+  const loadedParts = useRef<Set<string>>(new Set());
+  const detailKey = `${matchId}:${playerPuuid}`;
 
   useEffect(() => {
     let cancelled = false;
     setDetail(null);
     setError(null);
     setActiveTab("build");
+    setLoadedDetailKey(null);
+    setLoadingPart(null);
+    setPartErrors({ build: null, summary: null });
+    setPartApiCalls({ build: 0, summary: 0 });
+    loadedParts.current.clear();
     api
       .getMatchDetail(matchId, playerPuuid)
       .then((value) => {
         if (!cancelled) {
           setDetail(value);
+          setLoadedDetailKey(detailKey);
         }
       })
       .catch((exc) => {
@@ -3241,19 +3995,126 @@ function MatchDetailPanel({
     };
   }, [matchId, playerPuuid]);
 
+  useEffect(() => {
+    if (!detail || loadedDetailKey !== detailKey) {
+      return;
+    }
+    const partKey = `${detailKey}:${activeTab}`;
+    if (loadedParts.current.has(partKey)) {
+      return;
+    }
+
+    let cancelled = false;
+    let completed = false;
+    loadedParts.current.add(partKey);
+    setLoadingPart(activeTab);
+    setPartErrors((current) => ({ ...current, [activeTab]: null }));
+    const request =
+      activeTab === "build"
+        ? api.getMatchBuildDetail(matchId, playerPuuid)
+        : api.getMatchRankDetail(matchId, playerPuuid);
+    request
+      .then((value) => {
+        if (cancelled) {
+          return;
+        }
+        completed = true;
+        setPartApiCalls((current) => ({
+          ...current,
+          [activeTab]: value.detailLoad.externalApiCalls,
+        }));
+        setDetail((current) => {
+          if (!current) {
+            return current;
+          }
+          if (activeTab === "build" && "buildTimeline" in value) {
+            return {
+              ...current,
+              buildTimeline: value.buildTimeline,
+              timelineError: value.timelineError,
+              detailLoad: {
+                ...current.detailLoad,
+                timelineSource: value.detailLoad.timelineSource,
+                externalApiCalls:
+                  current.detailLoad.externalApiCalls +
+                  value.detailLoad.externalApiCalls,
+              },
+            };
+          }
+          if (activeTab === "summary" && "me" in value) {
+            return {
+              ...current,
+              me: value.me,
+              enemyLaner: value.enemyLaner,
+              othersAlly: value.othersAlly,
+              othersEnemy: value.othersEnemy,
+              detailLoad: {
+                ...current.detailLoad,
+                rankCacheHits: value.detailLoad.rankCacheHits,
+                rankError: value.detailLoad.rankError,
+                externalApiCalls:
+                  current.detailLoad.externalApiCalls +
+                  value.detailLoad.externalApiCalls,
+              },
+            };
+          }
+          return current;
+        });
+      })
+      .catch((exc) => {
+        if (!cancelled) {
+          loadedParts.current.delete(partKey);
+          setPartErrors((current) => ({
+            ...current,
+            [activeTab]:
+              exc instanceof Error ? exc.message : "상세 정보 확인 실패",
+          }));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoadingPart((current) => (current === activeTab ? null : current));
+        }
+      });
+    return () => {
+      cancelled = true;
+      if (!completed) {
+        loadedParts.current.delete(partKey);
+      }
+    };
+  }, [activeTab, detailKey, loadedDetailKey]);
+
   if (error) {
     return <div className="detail-panel error-box">{error}</div>;
   }
   if (!detail) {
-    return <div className="detail-panel">매치 상세를 불러오는 중...</div>;
+    return (
+      <div className="detail-panel">
+        내 컴퓨터에 저장된 기본 경기 정보를 불러오는 중이에요.
+      </div>
+    );
   }
+  const activePartError = partErrors[activeTab];
+  const sourceMessage =
+    loadingPart === activeTab
+      ? activeTab === "build"
+        ? "빌드에 필요한 타임라인을 확인하고 있어요."
+        : "종합 표에 필요한 참가자 랭크를 확인하고 있어요."
+      : partApiCalls[activeTab] > 0
+        ? `이 탭의 새 정보 요청 ${partApiCalls[activeTab]}번을 마치고 내 컴퓨터에 저장했어요.`
+        : "필요한 상세 정보는 내 컴퓨터에 저장된 자료를 사용했어요.";
   return (
     <div className="detail-panel">
+      <p className="detail-load-source" role="status">
+        {sourceMessage}
+      </p>
       <div className="detail-tabs" role="tablist" aria-label="매치 상세 탭">
         <button
           className={activeTab === "summary" ? "active" : ""}
           onClick={() => setActiveTab("summary")}
           type="button"
+          role="tab"
+          aria-selected={activeTab === "summary"}
         >
           종합
         </button>
@@ -3261,11 +4122,21 @@ function MatchDetailPanel({
           className={activeTab === "build" ? "active" : ""}
           onClick={() => setActiveTab("build")}
           type="button"
+          role="tab"
+          aria-selected={activeTab === "build"}
         >
           빌드
         </button>
       </div>
-      {activeTab === "summary" ? (
+      {(activePartError ||
+        (activeTab === "summary" && detail.detailLoad.rankError)) && (
+        <div className="error-box">
+          {activePartError || detail.detailLoad.rankError}
+        </div>
+      )}
+      {loadingPart === activeTab ? (
+        <p className="timeline-notice">필요한 정보만 확인하고 있어요.</p>
+      ) : activeTab === "summary" ? (
         <MatchSummaryTab detail={detail} />
       ) : (
         <BuildTab detail={detail} />

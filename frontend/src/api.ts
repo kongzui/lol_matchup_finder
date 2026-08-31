@@ -1,15 +1,27 @@
 import type {
   DbSearchBody,
   DbSearchPayload,
+  JobListPayload,
   JobPayload,
-  JobStatus,
+  MatchBuildDetail,
   MatchDetail,
+  MatchRankDetail,
   MetaOptions,
   MultiSearchBody,
   PlayerMemo,
   ResolvePlayerMemoPayload,
   SearchBody,
 } from "./types";
+
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
 
 async function requestJson<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(url, {
@@ -24,12 +36,57 @@ async function requestJson<T>(url: string, options?: RequestInit): Promise<T> {
     } catch {
       // JSON이 아닌 오류 응답은 기본 메시지를 사용한다.
     }
-    throw new Error(message);
+    throw new ApiError(message, response.status);
   }
   return (await response.json()) as T;
 }
 
+const jobResultRequests = new Map<string, Promise<JobPayload>>();
+const matchDetailRequests = new Map<string, Promise<unknown>>();
+
+function requestJobResult(jobId: string): Promise<JobPayload> {
+  const existing = jobResultRequests.get(jobId);
+  if (existing) {
+    return existing;
+  }
+  const request = requestJson<JobPayload>(`/api/jobs/${jobId}/result`).catch(
+    (error) => {
+      jobResultRequests.delete(jobId);
+      throw error;
+    },
+  );
+  jobResultRequests.set(jobId, request);
+  return request;
+}
+
+function requestMatchDetailPart<T>(url: string): Promise<T> {
+  const existing = matchDetailRequests.get(url) as Promise<T> | undefined;
+  if (existing) {
+    return existing;
+  }
+  const request = requestJson<T>(url).catch((error) => {
+    matchDetailRequests.delete(url);
+    throw error;
+  });
+  matchDetailRequests.set(url, request);
+  return request;
+}
+
+function matchDetailUrl(
+  matchId: string,
+  playerPuuid: string,
+  part = "",
+): string {
+  return `/api/matches/${encodeURIComponent(matchId)}/detail${part}?playerPuuid=${encodeURIComponent(
+    playerPuuid,
+  )}`;
+}
+
 export const api = {
+  startup: () =>
+    requestJson<MetaOptions>("/api/startup", {
+      method: "POST",
+    }),
   getMeta: () => requestJson<MetaOptions>("/api/meta/options"),
   refreshMeta: () =>
     requestJson<MetaOptions>("/api/meta/refresh", { method: "POST" }),
@@ -48,19 +105,28 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ confirmed }),
     }),
-  getJob: (jobId: string) => requestJson<JobStatus>(`/api/jobs/${jobId}`),
-  getJobResult: (jobId: string) =>
-    requestJson<JobPayload>(`/api/jobs/${jobId}/result`),
+  listJobs: (recentLimit = 20) =>
+    requestJson<JobListPayload>(`/api/jobs?recentLimit=${recentLimit}`),
+  getJobResult: requestJobResult,
   dbSearch: (body: DbSearchBody) =>
     requestJson<DbSearchPayload>("/api/db-search", {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  getDbEnemyRiotIds: (body: DbSearchBody) =>
+    requestJson<{ items: string[] }>("/api/db-search/enemy-riot-ids", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   getMatchDetail: (matchId: string, playerPuuid: string) =>
-    requestJson<MatchDetail>(
-      `/api/matches/${encodeURIComponent(matchId)}/detail?playerPuuid=${encodeURIComponent(
-        playerPuuid,
-      )}`,
+    requestMatchDetailPart<MatchDetail>(matchDetailUrl(matchId, playerPuuid)),
+  getMatchBuildDetail: (matchId: string, playerPuuid: string) =>
+    requestMatchDetailPart<MatchBuildDetail>(
+      matchDetailUrl(matchId, playerPuuid, "/build"),
+    ),
+  getMatchRankDetail: (matchId: string, playerPuuid: string) =>
+    requestMatchDetailPart<MatchRankDetail>(
+      matchDetailUrl(matchId, playerPuuid, "/ranks"),
     ),
   listPlayerMemos: () =>
     requestJson<{ items: PlayerMemo[] }>("/api/player-memos"),
@@ -102,6 +168,25 @@ export const api = {
       throw new Error("CSV 다운로드에 실패했습니다.");
     }
     return response.blob();
+  },
+  exportSearch: async (jobId: string) => {
+    const response = await fetch(searchCsvUrl(jobId));
+    if (!response.ok) {
+      let message = "CSV 다운로드에 실패했습니다.";
+      try {
+        const body = (await response.json()) as { detail?: string };
+        message = body.detail || message;
+      } catch {
+        // JSON이 아닌 오류 응답은 쉬운 기본 메시지를 사용한다.
+      }
+      throw new ApiError(message, response.status);
+    }
+    const disposition = response.headers.get("Content-Disposition") || "";
+    const filenameMatch = disposition.match(/filename="?([^";]+)"?/i);
+    return {
+      blob: await response.blob(),
+      filename: filenameMatch?.[1] || "search_matchup_results.csv",
+    };
   },
 };
 

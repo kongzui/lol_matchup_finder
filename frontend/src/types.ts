@@ -27,18 +27,25 @@ export interface MetaOptions {
   latestSearchRiotId: string | null;
   dbMatchCount: number;
   dbLastMatchCreation: number | null;
+  dbIndexedMatchCount: number;
+  dbIndexRowCount: number;
+  dbIndexMaxId: number;
+  dbLastIndexedMatchCreation: number | null;
   autoRefresh: {
     status:
       | "not_checked"
       | "checking"
       | "skipped"
+      | "ready"
       | "running"
       | "succeeded"
+      | "partial"
       | "failed"
       | "stale";
     message: string;
     jobId: string | null;
     targetCount: number;
+    plannedTargetCount: number;
     days: number | null;
     matchesPerPlayer: number | null;
     lastCollectedAt: number | null;
@@ -77,15 +84,40 @@ export interface DbSearchBody {
   riotIdsRaw: string;
   page: number;
   pageSize: number;
+  snapshot?: DbSearchSnapshot;
+}
+
+export interface DbSearchSnapshot {
+  targetPuuids: string[];
+  startTs: number;
+  endTs: number;
+  patchPrefix: string | null;
+  maxIndexId: number;
+  targetLabel: string;
 }
 
 export interface JobStatus {
   jobId: string;
   kind: string;
-  status: "queued" | "running" | "succeeded" | "failed";
+  origin: string;
+  title: string;
+  targetSummary: string;
+  status: "queued" | "running" | "succeeded" | "partial" | "failed";
   progress: number;
   message: string;
   error: string | null;
+  createdAt: number;
+  startedAt: number | null;
+  updatedAt: number;
+  finishedAt: number | null;
+  resultAvailable: boolean;
+}
+
+export interface JobListPayload {
+  serverInstanceId: string;
+  serverStartedAt: number;
+  activeJobs: JobStatus[];
+  recentJobs: JobStatus[];
 }
 
 export interface MatchRow {
@@ -152,6 +184,7 @@ export interface MultiSearchPayload {
   cache_hits: number;
   api_calls: number;
   indexed_rows: number;
+  continuation_advanced_count: number;
   period_label: string;
   matches_per_player: number;
   resolved_users: MemoTarget[];
@@ -179,6 +212,7 @@ export interface DbSearchPayload {
   api_calls: number;
   target_label: string;
   memos: Record<string, string>;
+  snapshot: DbSearchSnapshot;
 }
 
 export interface JobPayload {
@@ -200,6 +234,13 @@ export interface PlayerMemo {
   riot_id_tag_line?: string | null;
   summoner_name?: string | null;
   last_seen_at?: number | null;
+  last_collected_at?: number | null;
+  pending_collection_target_at?: number | null;
+  collection_status?:
+    | "current"
+    | "needs_collection"
+    | "not_collected"
+    | "continuation_needed";
   game_count: number;
 }
 
@@ -298,4 +339,31 @@ export interface MatchDetail {
     }>;
   } | null;
   timelineError: string | null;
+  detailLoad: {
+    timelineSource: "not_requested" | "stored" | "downloaded" | "unavailable";
+    rankCacheHits: number;
+    externalApiCalls: number;
+    rankError: string | null;
+  };
+}
+
+export interface MatchBuildDetail {
+  buildTimeline: MatchDetail["buildTimeline"];
+  timelineError: string | null;
+  detailLoad: {
+    timelineSource: "stored" | "downloaded" | "unavailable";
+    externalApiCalls: number;
+  };
+}
+
+export interface MatchRankDetail {
+  me: DetailPlayer;
+  enemyLaner: DetailPlayer | null;
+  othersAlly: TeamSummary[];
+  othersEnemy: TeamSummary[];
+  detailLoad: {
+    rankCacheHits: number;
+    externalApiCalls: number;
+    rankError: string | null;
+  };
 }
