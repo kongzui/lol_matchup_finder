@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import time
+from threading import Lock
 from typing import Any
 from urllib.parse import quote
 
@@ -18,6 +19,8 @@ import httpx
 DEFAULT_TIMEOUT = 10.0
 MAX_RETRY_429 = 2
 DEFAULT_BACKOFF_SECONDS = 5.0
+MAX_RETRY_AFTER_SECONDS = 120.0
+_RIOT_REQUEST_LOCK = Lock()
 
 
 class RiotApiError(RuntimeError):
@@ -63,6 +66,7 @@ class RiotClient:
         self._timeout = timeout
         self._sleep = sleep_func
         self._client: httpx.Client | None = None
+        self.request_count = 0
 
     # --- 컨텍스트 관리 ---
     def __enter__(self) -> "RiotClient":
@@ -222,64 +226,66 @@ class RiotClient:
         client = self._ensure_client()
         attempts = 0
 
-        while True:
-            try:
-                resp = client.get(url, params=params)
-            except httpx.HTTPError as exc:
-                raise RiotApiError(f"Riot API 통신 오류: {exc}") from exc
-
-            status = resp.status_code
-
-            if status == 200:
+        with _RIOT_REQUEST_LOCK:
+            while True:
+                self.request_count += 1
                 try:
-                    return resp.json()
-                except ValueError as exc:
-                    raise RiotApiError(
-                        "Riot API 응답을 JSON으로 파싱할 수 없습니다."
-                    ) from exc
+                    resp = client.get(url, params=params)
+                except httpx.HTTPError as exc:
+                    raise RiotApiError(f"Riot API 통신 오류: {exc}") from exc
 
-            if status == 401 or status == 403:
-                raise RiotApiAuthError(
-                    "Riot API Key가 만료되었거나 잘못되었습니다. "
-                    "Developer Portal에서 새 키를 발급받아 .env를 갱신해주세요.",
+                status = resp.status_code
+
+                if status == 200:
+                    try:
+                        return resp.json()
+                    except ValueError as exc:
+                        raise RiotApiError(
+                            "Riot API 응답을 JSON으로 파싱할 수 없습니다."
+                        ) from exc
+
+                if status == 401 or status == 403:
+                    raise RiotApiAuthError(
+                        "Riot API Key가 만료되었거나 잘못되었습니다. "
+                        "Developer Portal에서 새 키를 발급받아 .env를 갱신해주세요.",
+                        status_code=status,
+                    )
+
+                if status == 404:
+                    raise RiotApiNotFound(
+                        not_found_message or "Riot API 리소스를 찾을 수 없습니다.",
+                        status_code=status,
+                    )
+
+                if status == 429 and attempts < MAX_RETRY_429:
+                    attempts += 1
+                    wait_s = self._parse_retry_after(resp.headers.get("Retry-After"))
+                    self._sleep(wait_s)
+                    continue
+
+                if status == 429:
+                    raise RiotApiRateLimited(
+                        "Riot API 호출 제한에 도달했습니다. "
+                        "잠시 후 다시 시도하거나, 검색 기간을 줄여주세요.",
+                        status_code=status,
+                    )
+
+                if 500 <= status < 600 and attempts < MAX_RETRY_429:
+                    # 일시적 서버 오류는 짧게 한 번 재시도한다.
+                    attempts += 1
+                    self._sleep(DEFAULT_BACKOFF_SECONDS)
+                    continue
+
+                raise RiotApiError(
+                    f"Riot API 오류 (status={status}): {resp.text[:200]}",
                     status_code=status,
                 )
-
-            if status == 404:
-                raise RiotApiNotFound(
-                    not_found_message or "Riot API 리소스를 찾을 수 없습니다.",
-                    status_code=status,
-                )
-
-            if status == 429 and attempts < MAX_RETRY_429:
-                attempts += 1
-                wait_s = self._parse_retry_after(resp.headers.get("Retry-After"))
-                self._sleep(wait_s)
-                continue
-
-            if status == 429:
-                raise RiotApiRateLimited(
-                    "Riot API 호출 제한에 도달했습니다. "
-                    "잠시 후 다시 시도하거나, 검색 기간을 줄여주세요.",
-                    status_code=status,
-                )
-
-            if 500 <= status < 600 and attempts < MAX_RETRY_429:
-                # 일시적 서버 오류는 짧게 한 번 재시도한다.
-                attempts += 1
-                self._sleep(DEFAULT_BACKOFF_SECONDS)
-                continue
-
-            raise RiotApiError(
-                f"Riot API 오류 (status={status}): {resp.text[:200]}",
-                status_code=status,
-            )
 
     @staticmethod
     def _parse_retry_after(value: str | None) -> float:
         if not value:
             return DEFAULT_BACKOFF_SECONDS
         try:
-            return max(1.0, float(value))
+            return min(MAX_RETRY_AFTER_SECONDS, max(1.0, float(value)))
         except ValueError:
             return DEFAULT_BACKOFF_SECONDS

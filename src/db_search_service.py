@@ -42,6 +42,13 @@ class IndexedMatchupSearchRequest:
     target_puuids: tuple[str, ...]
     resolve_cache_hits: int
     resolve_api_calls: int
+    result_limit: int | None = None
+    result_offset: int = 0
+    fixed_start_ts: int | None = None
+    fixed_end_ts: int | None = None
+    fixed_patch_prefix: str | None = None
+    snapshot_max_index_id: int | None = None
+    target_label: str = "관심 유저"
 
 
 @dataclass(frozen=True)
@@ -61,6 +68,24 @@ class IndexedMatchupSearchPayload:
     patch_prefix: str | None
     target_label: str
     memos: dict[str, str]
+    total: int
+    wins: int
+    losses: int
+    target_puuids: tuple[str, ...]
+    snapshot_max_index_id: int
+
+
+@dataclass(frozen=True)
+class _IndexedMatchupFilters:
+    """목록·요약·전체 복사가 공유하는 확정 SQL 조건."""
+
+    my_champion_key: str | None
+    enemy_champion_key: str | None
+    lane_value: str
+    start_ts: int
+    end_ts: int
+    patch_prefix: str | None
+    snapshot_max_index_id: int
 
 
 def _patch_prefix(version: str) -> str | None:
@@ -71,13 +96,12 @@ def _patch_prefix(version: str) -> str | None:
     return ".".join(parts[:2])
 
 
-def run_indexed_matchup_search(
-    *,
+def _resolve_filters(
     request: IndexedMatchupSearchRequest,
     champion_data: ChampionData,
     cache: MatchCache,
-) -> IndexedMatchupSearchPayload:
-    """Riot API 호출 없이 matchup_index에서만 매치업을 조회한다."""
+) -> _IndexedMatchupFilters:
+    """한 조회에서 사용할 챔피언·기간·스냅샷 조건을 확정한다."""
     my_champion_key: str | None = None
     if request.my_champion_korean != DB_ALL_LABEL:
         my_champion_key = champion_data.to_english_key(request.my_champion_korean)
@@ -93,7 +117,10 @@ def run_indexed_matchup_search(
     if request.lane_label not in LANE_LABEL_TO_TEAM_POSITION:
         raise RiotApiError("선택한 라인을 인식하지 못했습니다.")
     lane_value = LANE_LABEL_TO_TEAM_POSITION[request.lane_label]
-    if request.period_kind == DB_PERIOD_ALL_LABEL:
+    if request.fixed_start_ts is not None and request.fixed_end_ts is not None:
+        start_ts = request.fixed_start_ts
+        end_ts = request.fixed_end_ts
+    elif request.period_kind == DB_PERIOD_ALL_LABEL:
         start_ts = 0
         end_ts = int(datetime.now().timestamp())
     elif request.period_kind in PERIOD_PRESETS:
@@ -111,22 +138,57 @@ def run_indexed_matchup_search(
         raise RiotApiError("검색 기간을 인식하지 못했습니다.")
 
     patch_prefix = (
-        _patch_prefix(champion_data.version) if request.current_patch_only else None
+        request.fixed_patch_prefix
+        if request.fixed_start_ts is not None
+        else (
+            _patch_prefix(champion_data.version) if request.current_patch_only else None
+        )
     )
-    results = cache.search_matchup_index(
-        player_champion_key=my_champion_key,
+    snapshot_max_index_id = (
+        request.snapshot_max_index_id
+        if request.snapshot_max_index_id is not None
+        else cache.get_matchup_index_max_id()
+    )
+    return _IndexedMatchupFilters(
+        my_champion_key=my_champion_key,
         enemy_champion_key=enemy_champion_key,
-        lane=lane_value,
+        lane_value=lane_value,
         start_ts=start_ts,
         end_ts=end_ts,
         patch_prefix=patch_prefix,
-        player_puuids=list(request.target_puuids) or None,
-        require_player_memo=not request.target_puuids,
+        snapshot_max_index_id=snapshot_max_index_id,
     )
-    target_label = (
-        f"입력 유저 {len(request.target_puuids)}명"
-        if request.target_puuids
-        else "메모 유저"
+
+
+def run_indexed_matchup_search(
+    *,
+    request: IndexedMatchupSearchRequest,
+    champion_data: ChampionData,
+    cache: MatchCache,
+) -> IndexedMatchupSearchPayload:
+    """Riot API 호출 없이 matchup_index에서만 매치업을 조회한다."""
+    filters = _resolve_filters(request, champion_data, cache)
+    results = cache.search_matchup_index(
+        player_champion_key=filters.my_champion_key,
+        enemy_champion_key=filters.enemy_champion_key,
+        lane=filters.lane_value,
+        start_ts=filters.start_ts,
+        end_ts=filters.end_ts,
+        patch_prefix=filters.patch_prefix,
+        player_puuids=list(request.target_puuids),
+        max_index_id=filters.snapshot_max_index_id,
+        limit=request.result_limit,
+        offset=request.result_offset,
+    )
+    stats = cache.get_matchup_index_stats(
+        player_champion_key=filters.my_champion_key,
+        enemy_champion_key=filters.enemy_champion_key,
+        lane=filters.lane_value,
+        start_ts=filters.start_ts,
+        end_ts=filters.end_ts,
+        patch_prefix=filters.patch_prefix,
+        player_puuids=list(request.target_puuids),
+        max_index_id=filters.snapshot_max_index_id,
     )
     memo_puuids = [
         puuid
@@ -137,16 +199,41 @@ def run_indexed_matchup_search(
 
     return IndexedMatchupSearchPayload(
         results=results,
-        scanned_total=len(results),
+        scanned_total=stats["total"],
         cache_hits=request.resolve_cache_hits,
         api_calls=request.resolve_api_calls,
-        my_champion_key=my_champion_key,
-        enemy_champion_key=enemy_champion_key,
+        my_champion_key=filters.my_champion_key,
+        enemy_champion_key=filters.enemy_champion_key,
         lane_label=request.lane_label,
         period_kind=request.period_kind or DB_DEFAULT_PERIOD_LABEL,
-        start_ts=start_ts,
-        end_ts=end_ts,
-        patch_prefix=patch_prefix,
-        target_label=target_label,
+        start_ts=filters.start_ts,
+        end_ts=filters.end_ts,
+        patch_prefix=filters.patch_prefix,
+        target_label=request.target_label,
         memos=cache.get_player_memos(memo_puuids),
+        total=stats["total"],
+        wins=stats["wins"],
+        losses=stats["losses"],
+        target_puuids=request.target_puuids,
+        snapshot_max_index_id=filters.snapshot_max_index_id,
+    )
+
+
+def find_indexed_enemy_riot_ids(
+    *,
+    request: IndexedMatchupSearchRequest,
+    champion_data: ChampionData,
+    cache: MatchCache,
+) -> list[str]:
+    """같은 확정 조건에서 고유 상대 Riot ID 열만 읽는다."""
+    filters = _resolve_filters(request, champion_data, cache)
+    return cache.search_matchup_enemy_riot_ids(
+        player_champion_key=filters.my_champion_key,
+        enemy_champion_key=filters.enemy_champion_key,
+        lane=filters.lane_value,
+        start_ts=filters.start_ts,
+        end_ts=filters.end_ts,
+        patch_prefix=filters.patch_prefix,
+        player_puuids=list(request.target_puuids),
+        max_index_id=filters.snapshot_max_index_id,
     )

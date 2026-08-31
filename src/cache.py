@@ -39,6 +39,12 @@ class MatchCache:
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self._db_path)
         conn.row_factory = sqlite3.Row
+        conn.create_function(
+            "CASEFOLD",
+            1,
+            lambda value: str(value).casefold() if value is not None else None,
+            deterministic=True,
+        )
         return conn
 
     def _init_schema(self) -> None:
@@ -96,11 +102,6 @@ class MatchCache:
                     last_seen_at INTEGER NOT NULL
                 );
 
-                DROP TABLE IF EXISTS collection_seed;
-                DROP TABLE IF EXISTS challenger_snapshot_runs;
-                DROP TABLE IF EXISTS challenger_player_snapshots;
-                DROP TABLE IF EXISTS challenger_players_current;
-
                 CREATE TABLE IF NOT EXISTS ranked_profile_cache (
                     puuid TEXT NOT NULL,
                     queue_id INTEGER NOT NULL,
@@ -121,15 +122,19 @@ class MatchCache:
                     PRIMARY KEY (match_id, source_puuid, source)
                 );
 
-                DELETE FROM match_discovery
-                WHERE source = 'challenger';
-
                 CREATE TABLE IF NOT EXISTS manual_collection_user (
                     puuid TEXT PRIMARY KEY,
                     riot_id_game_name TEXT,
                     riot_id_tag_line TEXT,
                     is_active INTEGER NOT NULL DEFAULT 1,
                     last_collected_at INTEGER,
+                    pending_collection_start_at INTEGER,
+                    pending_collection_end_at INTEGER,
+                    pending_collection_target_at INTEGER,
+                    pending_collection_offset INTEGER,
+                    pending_collection_queue_id INTEGER,
+                    pending_collection_region TEXT,
+                    pending_collection_matches_per_player INTEGER,
                     created_at INTEGER NOT NULL,
                     updated_at INTEGER NOT NULL
                 );
@@ -214,6 +219,27 @@ class MatchCache:
                     ADD COLUMN auto_refresh_enabled INTEGER NOT NULL DEFAULT 0
                     """
                 )
+            collection_columns = {
+                row["name"]
+                for row in conn.execute(
+                    "PRAGMA table_info(manual_collection_user)"
+                ).fetchall()
+            }
+            collection_column_types = {
+                "pending_collection_start_at": "INTEGER",
+                "pending_collection_end_at": "INTEGER",
+                "pending_collection_target_at": "INTEGER",
+                "pending_collection_offset": "INTEGER",
+                "pending_collection_queue_id": "INTEGER",
+                "pending_collection_region": "TEXT",
+                "pending_collection_matches_per_player": "INTEGER",
+            }
+            for column, column_type in collection_column_types.items():
+                if column not in collection_columns:
+                    conn.execute(
+                        "ALTER TABLE manual_collection_user "
+                        f"ADD COLUMN {column} {column_type}"
+                    )
             matchup_columns = {
                 row["name"]
                 for row in conn.execute("PRAGMA table_info(matchup_index)").fetchall()
@@ -317,17 +343,31 @@ class MatchCache:
             conn.commit()
 
     def get_match_cache_stats(self) -> dict[str, int | None]:
-        """저장된 매치 수와 가장 최근 매치 시각을 반환한다."""
+        """원본 매치와 실제 조회 가능한 인덱스 현황을 반환한다."""
         with self._connect() as conn:
-            row = conn.execute(
+            cache_row = conn.execute(
                 """
                 SELECT COUNT(*) AS match_count, MAX(game_creation) AS last_match_creation
                 FROM match_cache
                 """
             ).fetchone()
+            index_row = conn.execute(
+                """
+                SELECT
+                    COUNT(DISTINCT match_id) AS indexed_match_count,
+                    COUNT(*) AS indexed_row_count,
+                    MAX(game_creation) AS last_indexed_match_creation,
+                    COALESCE(MAX(id), 0) AS max_index_id
+                FROM matchup_index
+                """
+            ).fetchone()
         return {
-            "match_count": int(row["match_count"] or 0),
-            "last_match_creation": row["last_match_creation"],
+            "match_count": int(cache_row["match_count"] or 0),
+            "last_match_creation": cache_row["last_match_creation"],
+            "indexed_match_count": int(index_row["indexed_match_count"] or 0),
+            "indexed_row_count": int(index_row["indexed_row_count"] or 0),
+            "last_indexed_match_creation": index_row["last_indexed_match_creation"],
+            "max_index_id": int(index_row["max_index_id"] or 0),
         }
 
     # --- match_timeline_cache ---
@@ -489,9 +529,12 @@ class MatchCache:
                     pr.riot_id_tag_line,
                     pr.summoner_name,
                     pr.last_seen_at,
+                    mcu.last_collected_at,
+                    mcu.pending_collection_target_at,
                     COALESCE(mi.game_count, 0) AS game_count
                 FROM player_memo pm
                 LEFT JOIN player_registry pr ON pr.puuid = pm.puuid
+                LEFT JOIN manual_collection_user mcu ON mcu.puuid = pm.puuid
                 LEFT JOIN (
                     SELECT player_puuid, COUNT(*) AS game_count
                     FROM matchup_index
@@ -518,7 +561,14 @@ class MatchCache:
                     pm.memo,
                     pr.riot_id_game_name,
                     pr.riot_id_tag_line,
-                    mcu.last_collected_at
+                    mcu.last_collected_at,
+                    mcu.pending_collection_start_at,
+                    mcu.pending_collection_end_at,
+                    mcu.pending_collection_target_at,
+                    mcu.pending_collection_offset,
+                    mcu.pending_collection_queue_id,
+                    mcu.pending_collection_region,
+                    mcu.pending_collection_matches_per_player
                 FROM player_memo pm
                 JOIN player_registry pr ON pr.puuid = pm.puuid
                 LEFT JOIN manual_collection_user mcu ON mcu.puuid = pm.puuid
@@ -535,9 +585,18 @@ class MatchCache:
         game_name: str,
         tag_line: str,
     ) -> dict[str, Any] | None:
-        """player_registry에서 Riot ID로 유저를 찾는다."""
+        """player_registry에서 가장 최근에 확인한 Riot ID 유저를 찾는다."""
+        players = self.find_players_by_riot_id(game_name, tag_line)
+        return players[0] if players else None
+
+    def find_players_by_riot_id(
+        self,
+        game_name: str,
+        tag_line: str,
+    ) -> list[dict[str, Any]]:
+        """같은 Riot ID로 저장된 후보를 최근 확인 순서로 모두 반환한다."""
         with self._connect() as conn:
-            row = conn.execute(
+            rows = conn.execute(
                 """
                 SELECT
                     puuid,
@@ -548,10 +607,11 @@ class MatchCache:
                 FROM player_registry
                 WHERE lower(riot_id_game_name) = lower(?)
                   AND lower(riot_id_tag_line) = lower(?)
+                ORDER BY last_seen_at DESC, puuid ASC
                 """,
                 (game_name, tag_line),
-            ).fetchone()
-        return dict(row) if row is not None else None
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     def save_player_identity(
         self,
@@ -581,12 +641,8 @@ class MatchCache:
             conn.commit()
 
     def upsert_player_memo(self, puuid: str, memo: str) -> None:
-        """관심 유저 메모를 저장한다. 빈 메모는 삭제로 처리한다."""
+        """관심 유저 메모를 저장한다. 삭제는 전용 동작에서만 처리한다."""
         normalized_memo = memo.strip()
-        if not normalized_memo:
-            self.delete_player_memo(puuid)
-            return
-
         now = int(time.time())
         with self._connect() as conn:
             conn.execute(
@@ -738,6 +794,106 @@ class MatchCache:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def get_manual_collection_cursor(self, puuid: str) -> dict[str, Any] | None:
+        """끝나지 않은 사람별 수집 범위를 반환한다."""
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT
+                    pending_collection_start_at,
+                    pending_collection_end_at,
+                    pending_collection_target_at,
+                    pending_collection_offset,
+                    pending_collection_queue_id,
+                    pending_collection_region,
+                    pending_collection_matches_per_player
+                FROM manual_collection_user
+                WHERE puuid = ?
+                """,
+                (puuid,),
+            ).fetchone()
+        required_columns = (
+            "pending_collection_start_at",
+            "pending_collection_end_at",
+            "pending_collection_target_at",
+        )
+        if row is None or any(row[column] is None for column in required_columns):
+            return None
+        return {
+            "start_at": int(row["pending_collection_start_at"]),
+            "end_at": int(row["pending_collection_end_at"]),
+            "target_at": int(row["pending_collection_target_at"]),
+            "offset": int(row["pending_collection_offset"] or 0),
+            "queue_id": row["pending_collection_queue_id"],
+            "region": row["pending_collection_region"],
+            "matches_per_player": row["pending_collection_matches_per_player"],
+        }
+
+    def save_manual_collection_cursor(
+        self,
+        *,
+        puuid: str,
+        start_at: int,
+        end_at: int,
+        target_at: int,
+        offset: int,
+        queue_id: int,
+        region: str,
+        matches_per_player: int,
+    ) -> None:
+        """다음 실행에서 이어갈 사람별 수집 범위를 저장한다."""
+        now = int(time.time())
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE manual_collection_user
+                SET
+                    pending_collection_start_at = ?,
+                    pending_collection_end_at = ?,
+                    pending_collection_target_at = ?,
+                    pending_collection_offset = ?,
+                    pending_collection_queue_id = ?,
+                    pending_collection_region = ?,
+                    pending_collection_matches_per_player = ?,
+                    updated_at = ?
+                WHERE puuid = ?
+                """,
+                (
+                    start_at,
+                    end_at,
+                    target_at,
+                    max(offset, 0),
+                    queue_id,
+                    region,
+                    max(matches_per_player, 1),
+                    now,
+                    puuid,
+                ),
+            )
+            conn.commit()
+
+    def clear_manual_collection_cursor(self, puuid: str) -> None:
+        """완료했거나 잘못된 사람별 수집 이어받기 범위를 지운다."""
+        now = int(time.time())
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE manual_collection_user
+                SET
+                    pending_collection_start_at = NULL,
+                    pending_collection_end_at = NULL,
+                    pending_collection_target_at = NULL,
+                    pending_collection_offset = NULL,
+                    pending_collection_queue_id = NULL,
+                    pending_collection_region = NULL,
+                    pending_collection_matches_per_player = NULL,
+                    updated_at = ?
+                WHERE puuid = ?
+                """,
+                (now, puuid),
+            )
+            conn.commit()
+
     def mark_manual_collection_user_collected(
         self,
         *,
@@ -750,7 +906,16 @@ class MatchCache:
             conn.execute(
                 """
                 UPDATE manual_collection_user
-                SET last_collected_at = ?, updated_at = ?
+                SET
+                    last_collected_at = ?,
+                    pending_collection_start_at = NULL,
+                    pending_collection_end_at = NULL,
+                    pending_collection_target_at = NULL,
+                    pending_collection_offset = NULL,
+                    pending_collection_queue_id = NULL,
+                    pending_collection_region = NULL,
+                    pending_collection_matches_per_player = NULL,
+                    updated_at = ?
                 WHERE puuid = ?
                 """,
                 (collected_at or now, now, puuid),
@@ -758,6 +923,28 @@ class MatchCache:
             conn.commit()
 
     # --- matchup_index ---
+    def get_indexed_match_ids(self, match_ids: list[str]) -> set[str]:
+        """이미 조회용 인덱스가 있는 matchId만 한 번에 반환한다."""
+        unique_ids = list(dict.fromkeys(match_id for match_id in match_ids if match_id))
+        if not unique_ids:
+            return set()
+
+        indexed_ids: set[str] = set()
+        with self._connect() as conn:
+            for start in range(0, len(unique_ids), 900):
+                chunk = unique_ids[start : start + 900]
+                placeholders = ",".join("?" for _ in chunk)
+                rows = conn.execute(
+                    f"""
+                    SELECT DISTINCT match_id
+                    FROM matchup_index
+                    WHERE match_id IN ({placeholders})
+                    """,
+                    tuple(chunk),
+                ).fetchall()
+                indexed_ids.update(row["match_id"] for row in rows)
+        return indexed_ids
+
     def index_match(self, match: dict[str, Any], allowed_queue_id: int = 420) -> int:
         """매치 상세 JSON을 검색용 matchup_index row로 변환해 저장한다."""
         if not isinstance(match, dict):
@@ -879,8 +1066,8 @@ class MatchCache:
 
         return len(rows)
 
-    def search_matchup_index(
-        self,
+    @staticmethod
+    def _matchup_index_filter(
         *,
         player_champion_key: str | None,
         enemy_champion_key: str | None,
@@ -888,17 +1075,21 @@ class MatchCache:
         start_ts: int | None,
         end_ts: int | None,
         patch_prefix: str | None,
-        player_puuids: list[str] | None = None,
-        require_player_memo: bool = False,
-    ) -> list[dict[str, Any]]:
-        """matchup_index만 사용해 DB조회 결과를 가져온다."""
+        player_puuids: list[str] | None,
+        require_player_memo: bool,
+        max_index_id: int | None,
+    ) -> tuple[str, list[Any]]:
+        """조회 목록과 요약이 똑같이 쓰는 WHERE 절을 만든다."""
         clauses = ["mi.lane = ?"]
         params: list[Any] = [lane]
 
-        if player_puuids:
+        if player_puuids is not None:
+            if not player_puuids:
+                clauses.append("0")
             placeholders = ",".join("?" for _ in player_puuids)
-            clauses.append(f"mi.player_puuid IN ({placeholders})")
-            params.extend(player_puuids)
+            if placeholders:
+                clauses.append(f"mi.player_puuid IN ({placeholders})")
+                params.extend(player_puuids)
         if require_player_memo:
             clauses.append(
                 "EXISTS (SELECT 1 FROM player_memo pm WHERE pm.puuid = mi.player_puuid)"
@@ -918,8 +1109,50 @@ class MatchCache:
         if patch_prefix:
             clauses.append("mi.game_version LIKE ?")
             params.append(f"{patch_prefix}.%")
+        if max_index_id is not None:
+            clauses.append("mi.id <= ?")
+            params.append(max(max_index_id, 0))
+        return " AND ".join(clauses), params
 
-        where_sql = " AND ".join(clauses)
+    def get_matchup_index_max_id(self) -> int:
+        """페이지와 내보내기가 함께 사용할 현재 인덱스 끝 번호를 반환한다."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT COALESCE(MAX(id), 0) AS max_id FROM matchup_index"
+            ).fetchone()
+        return int(row["max_id"] or 0)
+
+    def search_matchup_index(
+        self,
+        *,
+        player_champion_key: str | None,
+        enemy_champion_key: str | None,
+        lane: str,
+        start_ts: int | None,
+        end_ts: int | None,
+        patch_prefix: str | None,
+        player_puuids: list[str] | None = None,
+        require_player_memo: bool = False,
+        max_index_id: int | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """matchup_index만 사용해 DB조회 결과를 가져온다."""
+        where_sql, params = self._matchup_index_filter(
+            player_champion_key=player_champion_key,
+            enemy_champion_key=enemy_champion_key,
+            lane=lane,
+            start_ts=start_ts,
+            end_ts=end_ts,
+            patch_prefix=patch_prefix,
+            player_puuids=player_puuids,
+            require_player_memo=require_player_memo,
+            max_index_id=max_index_id,
+        )
+        pagination_sql = ""
+        if limit is not None:
+            pagination_sql = "LIMIT ? OFFSET ?"
+            params.extend((max(limit, 1), max(offset, 0)))
 
         with self._connect() as conn:
             rows = conn.execute(
@@ -927,12 +1160,119 @@ class MatchCache:
                 SELECT mi.*
                 FROM matchup_index mi
                 WHERE {where_sql}
-                ORDER BY mi.game_creation DESC
+                ORDER BY mi.game_creation DESC, mi.id DESC
+                {pagination_sql}
                 """,
                 tuple(params),
             ).fetchall()
 
         return [_indexed_row_to_result(dict(row)) for row in rows]
+
+    def search_matchup_enemy_riot_ids(
+        self,
+        *,
+        player_champion_key: str | None,
+        enemy_champion_key: str | None,
+        lane: str,
+        start_ts: int | None,
+        end_ts: int | None,
+        patch_prefix: str | None,
+        player_puuids: list[str] | None = None,
+        require_player_memo: bool = False,
+        max_index_id: int | None = None,
+    ) -> list[str]:
+        """전체 경기 객체 대신 조건에 맞는 고유 상대 Riot ID만 읽는다."""
+        where_sql, params = self._matchup_index_filter(
+            player_champion_key=player_champion_key,
+            enemy_champion_key=enemy_champion_key,
+            lane=lane,
+            start_ts=start_ts,
+            end_ts=end_ts,
+            patch_prefix=patch_prefix,
+            player_puuids=player_puuids,
+            require_player_memo=require_player_memo,
+            max_index_id=max_index_id,
+        )
+        riot_id_sql = """
+            CASE
+                WHEN trim(COALESCE(mi.enemy_riot_id, '')) <> ''
+                    THEN mi.enemy_riot_id
+                WHEN trim(COALESCE(mi.enemy_game_name, '')) <> ''
+                 AND trim(COALESCE(mi.enemy_tag_line, '')) <> ''
+                    THEN mi.enemy_game_name || '#' || mi.enemy_tag_line
+                ELSE NULL
+            END
+        """
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                WITH filtered AS (
+                    SELECT
+                        {riot_id_sql} AS riot_id,
+                        mi.game_creation,
+                        mi.id
+                    FROM matchup_index mi
+                    WHERE {where_sql}
+                ), ranked AS (
+                    SELECT
+                        riot_id,
+                        game_creation,
+                        id,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY CASEFOLD(riot_id)
+                            ORDER BY game_creation DESC, id DESC
+                        ) AS duplicate_order
+                    FROM filtered
+                    WHERE riot_id IS NOT NULL
+                )
+                SELECT riot_id
+                FROM ranked
+                WHERE duplicate_order = 1
+                ORDER BY game_creation DESC, id DESC
+                """,
+                tuple(params),
+            ).fetchall()
+        return [str(row["riot_id"]) for row in rows]
+
+    def get_matchup_index_stats(
+        self,
+        *,
+        player_champion_key: str | None,
+        enemy_champion_key: str | None,
+        lane: str,
+        start_ts: int | None,
+        end_ts: int | None,
+        patch_prefix: str | None,
+        player_puuids: list[str] | None = None,
+        require_player_memo: bool = False,
+        max_index_id: int | None = None,
+    ) -> dict[str, int]:
+        """같은 조회 조건의 전체 경기 수와 승패 수를 계산한다."""
+        where_sql, params = self._matchup_index_filter(
+            player_champion_key=player_champion_key,
+            enemy_champion_key=enemy_champion_key,
+            lane=lane,
+            start_ts=start_ts,
+            end_ts=end_ts,
+            patch_prefix=patch_prefix,
+            player_puuids=player_puuids,
+            require_player_memo=require_player_memo,
+            max_index_id=max_index_id,
+        )
+        with self._connect() as conn:
+            row = conn.execute(
+                f"""
+                SELECT
+                    COUNT(*) AS total,
+                    COALESCE(SUM(CASE WHEN mi.win = 1 THEN 1 ELSE 0 END), 0) AS wins
+                FROM matchup_index mi
+                WHERE {where_sql}
+                """,
+                tuple(params),
+            ).fetchone()
+        total = int(row["total"] or 0)
+        wins = int(row["wins"] or 0)
+        return {"total": total, "wins": wins, "losses": total - wins}
 
     def backfill_matchup_index_from_discoveries(
         self,

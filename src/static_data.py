@@ -186,6 +186,7 @@ class StaticDataRepository:
         self,
         force_refresh: bool = False,
         check_latest: bool = False,
+        latest_version: str | None = None,
     ) -> StaticData:
         """캐시가 유효하면 캐시를, 아니면 Data Dragon 에서 새로 받아 반환한다."""
         cached_summoner = self._read_cache(self._KIND_SUMMONER)
@@ -208,17 +209,18 @@ class StaticDataRepository:
                 runes_payload=cached_runes["payload_json"],
             )
 
-        try:
-            latest_version = self._fetch_latest_version()
-        except httpx.HTTPError:
-            # 네트워크 실패 시 캐시가 있다면 캐시로 폴백한다.
-            if cached_summoner is not None and cached_runes is not None:
-                return self._build_data(
-                    version=cached_summoner["version"],
-                    summoner_payload=cached_summoner["payload_json"],
-                    runes_payload=cached_runes["payload_json"],
-                )
-            raise
+        if latest_version is None:
+            try:
+                latest_version = self._fetch_latest_version()
+            except httpx.HTTPError:
+                # 네트워크 실패 시 캐시가 있다면 캐시로 폴백한다.
+                if cached_summoner is not None and cached_runes is not None:
+                    return self._build_data(
+                        version=cached_summoner["version"],
+                        summoner_payload=cached_summoner["payload_json"],
+                        runes_payload=cached_runes["payload_json"],
+                    )
+                raise
 
         # 종류별로 버전 일치 여부를 확인해 필요한 것만 새로 받는다.
         summoner_payload = self._reuse_or_fetch(
