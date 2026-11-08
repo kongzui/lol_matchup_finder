@@ -13,7 +13,6 @@ import {
   RefreshCw,
   Save,
   Search,
-  Server,
   StickyNote,
   Trash2,
   UploadCloud,
@@ -974,19 +973,19 @@ export default function App() {
             <span className="nav-section-title">검색 도구</span>
             <NavButton
               active={active === "db"}
-              icon={<Database size={18} />}
+              icon={<Database size={16} />}
               label="저장된 매치업"
               onClick={() => setActive("db")}
             />
             <NavButton
               active={active === "search"}
-              icon={<Search size={18} />}
+              icon={<Search size={16} />}
               label="개별 유저 검색"
               onClick={() => setActive("search")}
             />
             <NavButton
               active={active === "multi"}
-              icon={<UploadCloud size={18} />}
+              icon={<UploadCloud size={16} />}
               label="새 데이터 가져오기"
               onClick={() => setActive("multi")}
             />
@@ -995,13 +994,13 @@ export default function App() {
             <span className="nav-section-title">기록 관리</span>
             <NavButton
               active={active === "memo"}
-              icon={<StickyNote size={18} />}
+              icon={<StickyNote size={16} />}
               label="관심 유저"
               onClick={() => setActive("memo")}
             />
             <NavButton
               active={active === "history"}
-              icon={<History size={18} />}
+              icon={<History size={16} />}
               label="최근검색 관리"
               onClick={() => setActive("history")}
             />
@@ -1010,17 +1009,12 @@ export default function App() {
         <div className="server-card">
           <div className="server-card-head">
             <div className="server-title">
-              <span className="server-icon" aria-hidden="true">
-                <Server size={16} />
-              </span>
-              <div>
-                <span>시스템 상태</span>
-                <strong>
-                  {meta.apiKeyDetected
-                    ? "새 데이터 수집 가능"
-                    : "저장된 데이터만 조회 가능"}
-                </strong>
-              </div>
+              <span>시스템 상태</span>
+              <strong>
+                {meta.apiKeyDetected
+                  ? "새 데이터 수집 가능"
+                  : "저장된 데이터만 조회 가능"}
+              </strong>
             </div>
             <span
               className={meta.apiKeyDetected ? "status ok" : "status danger"}
@@ -1029,26 +1023,47 @@ export default function App() {
               {meta.apiKeyDetected ? "준비됨" : "API 키 없음"}
             </span>
           </div>
-          <div className="server-environment" aria-label="서버 환경">
-            <span>{meta.region.toUpperCase()}</span>
-            <span>{meta.platform.toUpperCase()}</span>
-            <span>솔로 랭크 · {meta.queueId}</span>
-          </div>
-          <div className="server-db-stats">
+          <dl className="server-facts">
             <div>
-              <span>저장된 경기</span>
-              <strong>
+              <dt>저장된 경기</dt>
+              <dd>
                 {meta.dbIndexedMatchCount.toLocaleString("ko-KR")}개 조회 가능
-              </strong>
-              <small>원본 {meta.dbMatchCount.toLocaleString("ko-KR")}개</small>
+                <small>
+                  원본 {meta.dbMatchCount.toLocaleString("ko-KR")}개
+                </small>
+              </dd>
             </div>
             <div>
-              <span>마지막 조회 가능 경기</span>
-              <strong>
-                {dbLastMatchText(meta.dbLastIndexedMatchCreation)}
-              </strong>
+              <dt>마지막 경기</dt>
+              <dd>{dbLastMatchText(meta.dbLastIndexedMatchCreation)}</dd>
             </div>
-          </div>
+            <div>
+              <dt>서버 환경</dt>
+              <dd>
+                {meta.region.toUpperCase()} · {meta.platform.toUpperCase()} ·
+                솔로 랭크 {meta.queueId}
+              </dd>
+            </div>
+            <div>
+              <dt>게임 정보 버전</dt>
+              <dd className="server-version">
+                {meta.dataDragonVersion}
+                <button
+                  className="icon-button compact"
+                  type="button"
+                  onClick={refreshMeta}
+                  disabled={metaRefreshing}
+                  title="게임 정보 갱신"
+                  aria-label="게임 정보 갱신"
+                >
+                  <RefreshCw
+                    className={metaRefreshing ? "spin" : ""}
+                    size={13}
+                  />
+                </button>
+              </dd>
+            </div>
+          </dl>
           <div className={`server-match-collection ${meta.autoRefresh.status}`}>
             <div className="server-collection-head">
               <span>
@@ -1064,12 +1079,12 @@ export default function App() {
               </span>
               <em>{meta.autoRefresh.targetCount}명</em>
             </div>
-            <p className="server-collection-scope">
-              {playerMatchCollectionScope(meta)}
-            </p>
             <strong className="server-collection-state">
               {playerMatchCollectionSummary(meta)}
             </strong>
+            <p className="server-collection-scope">
+              {playerMatchCollectionScope(meta)}
+            </p>
             {meta.autoRefresh.requiresConfirmation && (
               <p className="server-collection-confirmation">
                 이번에 필요한 {meta.autoRefresh.plannedTargetCount}명 중 오래
@@ -1152,22 +1167,6 @@ export default function App() {
               }
             }}
           />
-          <div className="data-dragon-row">
-            <p>
-              <span>게임 정보 버전</span>
-              <strong>게임 정보 {meta.dataDragonVersion}</strong>
-            </p>
-            <button
-              className="icon-button compact"
-              type="button"
-              onClick={refreshMeta}
-              disabled={metaRefreshing}
-              title="게임 정보 갱신"
-              aria-label="게임 정보 갱신"
-            >
-              <RefreshCw className={metaRefreshing ? "spin" : ""} size={14} />
-            </button>
-          </div>
           {metaRefreshError && (
             <p className="server-error-text">{metaRefreshError}</p>
           )}
@@ -1281,6 +1280,8 @@ function NavButton({
   return (
     <button
       className={`nav-button ${active ? "active" : ""}`}
+      type="button"
+      aria-current={active ? "page" : undefined}
       onClick={onClick}
     >
       {icon}
@@ -1362,6 +1363,9 @@ function JobCenterPanel({
           >
             {Math.round(job.progress * 100)}% · {job.message || "진행 중"}
           </em>
+          <div className="job-center-bar" aria-hidden="true">
+            <div style={{ width: `${Math.round(job.progress * 100)}%` }} />
+          </div>
           {(job.kind === "search" || isMultiCollectionJob(job)) && (
             <button type="button" onClick={() => onOpen(job)}>
               이어보기
@@ -1676,17 +1680,11 @@ function SearchWorkspace({
   return (
     <section className="screen">
       <WorkspaceHeader
-        eyebrow="개별 유저 검색"
         title="개별 유저 매치업 검색"
         description="한 유저의 최근 솔로 랭크를 불러와 챔피언, 상대, 라인 조건에 맞는 경기만 찾아요."
       />
-      <form
-        className={`control-panel search-panel ${
-          body.periodKind === meta.customPeriodLabel ? "custom-period" : ""
-        }`}
-        onSubmit={submit}
-      >
-        <div className="riot-id-field">
+      <form className="filter-panel" onSubmit={submit}>
+        <div className="filter-target">
           <label className="field">
             <span>조회 유저</span>
             <input
@@ -1700,20 +1698,16 @@ function SearchWorkspace({
           </label>
           <MemoPlayerSelect state={playerMemos} onPick={applyMemoItem} />
         </div>
-        <div className="my-champion-field">
-          <ChampionSelect
-            label="기준 챔피언"
-            value={body.myChampionKorean}
-            meta={meta}
-            onChange={(value) => setBody({ ...body, myChampionKorean: value })}
-          />
-          <RecentMyChampionSearches
-            history={myChampionHistory}
-            onPick={(value) => setBody({ ...body, myChampionKorean: value })}
-          />
-        </div>
-        <div className="enemy-filter-field">
-          <div className="enemy-filter-controls">
+        <div className="filter-conditions">
+          <div className="filter-fields five">
+            <ChampionSelect
+              label="기준 챔피언"
+              value={body.myChampionKorean}
+              meta={meta}
+              onChange={(value) =>
+                setBody({ ...body, myChampionKorean: value })
+              }
+            />
             <SelectField
               label="상대 챔피언"
               value={body.enemyChampionKorean}
@@ -1737,49 +1731,60 @@ function SearchWorkspace({
               options={meta.periodOptions}
               onChange={(value) => setBody({ ...body, periodKind: value })}
             />
+            <SelectField
+              label="최대 매치"
+              value={String(body.maxMatches)}
+              options={["50", "100", "200", "300"]}
+              onChange={(value) =>
+                setBody({ ...body, maxMatches: Number(value) })
+              }
+            />
+            {body.periodKind === meta.customPeriodLabel && (
+              <div className="filter-dates">
+                <DateField
+                  label="시작일"
+                  value={body.customStart || ""}
+                  onChange={(value) => setBody({ ...body, customStart: value })}
+                />
+                <DateField
+                  label="종료일"
+                  value={body.customEnd || ""}
+                  onChange={(value) => setBody({ ...body, customEnd: value })}
+                />
+              </div>
+            )}
           </div>
-          <RecentEnemyChampionSearches
-            history={enemyChampionHistory}
-            onPick={(value) => setBody({ ...body, enemyChampionKorean: value })}
-          />
+          <div className="recent-group">
+            <RecentMyChampionSearches
+              history={myChampionHistory}
+              onPick={(value) => setBody({ ...body, myChampionKorean: value })}
+            />
+            <RecentEnemyChampionSearches
+              history={enemyChampionHistory}
+              onPick={(value) =>
+                setBody({ ...body, enemyChampionKorean: value })
+              }
+            />
+            <RecentRiotIdSearches
+              history={riotIdHistory}
+              onPick={applyHistoryItem}
+            />
+          </div>
         </div>
-        <SelectField
-          label="최대 매치"
-          value={String(body.maxMatches)}
-          options={["50", "100", "200", "300"]}
-          onChange={(value) => setBody({ ...body, maxMatches: Number(value) })}
-        />
-        {body.periodKind === meta.customPeriodLabel && (
-          <div className="search-custom-period-fields">
-            <DateField
-              label="시작일"
-              value={body.customStart || ""}
-              onChange={(value) => setBody({ ...body, customStart: value })}
-            />
-            <DateField
-              label="종료일"
-              value={body.customEnd || ""}
-              onChange={(value) => setBody({ ...body, customEnd: value })}
-            />
-          </div>
-        )}
-        <button
-          className="primary-action search-submit-action"
-          type="submit"
-          disabled={jobActive || !jobCenterReady}
-        >
-          <Search size={18} />
-          {!jobCenterReady
-            ? "기존 작업 확인 중"
-            : jobActive
-              ? "검색 중"
-              : "검색 실행"}
-        </button>
-        <RecentRiotIdSearches
-          className="search-riot-history"
-          history={riotIdHistory}
-          onPick={applyHistoryItem}
-        />
+        <div className="filter-foot">
+          <button
+            className="primary-action"
+            type="submit"
+            disabled={jobActive || !jobCenterReady}
+          >
+            <Search size={16} />
+            {!jobCenterReady
+              ? "기존 작업 확인 중"
+              : jobActive
+                ? "검색 중"
+                : "검색 실행"}
+          </button>
+        </div>
       </form>
 
       <JobProgress job={trackedJob} error={completion.error} />
@@ -2042,13 +2047,12 @@ function MultiCollectWorkspace({
   return (
     <section className="screen">
       <WorkspaceHeader
-        eyebrow="새 데이터 가져오기"
         title="여러 유저의 경기 가져오기"
         description="Riot ID를 입력해 분석에 사용할 최근 솔로 랭크 경기를 내 컴퓨터에 모아요."
       />
-      <form className="control-panel multi" onSubmit={submit}>
-        <div className="multi-riot-id-field">
-          <label className="field textarea-field">
+      <form className="filter-panel" onSubmit={submit}>
+        <div className="filter-target">
+          <label className="field">
             <span>조회 유저 목록</span>
             <textarea
               ref={textareaRef}
@@ -2059,47 +2063,52 @@ function MultiCollectWorkspace({
               placeholder={"Aoo#chi\nHide on bush#KR1, Keria#KR1"}
             />
           </label>
-        </div>
-        <MemoGroupSelect
-          groups={memoGroups}
-          state={playerMemos}
-          onPick={applyMemoGroup}
-        />
-        <div className="multi-options">
-          <SelectField
-            label="수집 기간"
-            value={String(body.days)}
-            options={meta.multiPeriodOptions.map(String)}
-            format={(value) => `최근 ${value}일`}
-            onChange={(value) => setBody({ ...body, days: Number(value) })}
-          />
-          <SelectField
-            label="1인당 최대 매치"
-            value={String(body.matchesPerPlayer)}
-            options={meta.multiMatchesPerPlayerOptions.map(String)}
-            format={(value) => `${value}판`}
-            onChange={(value) =>
-              setBody({ ...body, matchesPerPlayer: Number(value) })
-            }
+          <MemoGroupSelect
+            groups={memoGroups}
+            state={playerMemos}
+            onPick={applyMemoGroup}
           />
         </div>
-        <button
-          className="primary-action multi-submit-action"
-          type="submit"
-          disabled={jobActive || !jobCenterReady}
-        >
-          <UploadCloud size={18} />
-          {!jobCenterReady
-            ? "기존 작업 확인 중"
-            : jobActive
-              ? "수집 중"
-              : "수집 실행"}
-        </button>
-        <RecentRiotIdSearches
-          className="multi-riot-history"
-          history={riotIdHistory}
-          onPick={applyHistoryItem}
-        />
+        <div className="filter-conditions">
+          <div className="filter-fields two">
+            <SelectField
+              label="수집 기간"
+              value={String(body.days)}
+              options={meta.multiPeriodOptions.map(String)}
+              format={(value) => `최근 ${value}일`}
+              onChange={(value) => setBody({ ...body, days: Number(value) })}
+            />
+            <SelectField
+              label="1인당 최대 매치"
+              value={String(body.matchesPerPlayer)}
+              options={meta.multiMatchesPerPlayerOptions.map(String)}
+              format={(value) => `${value}판`}
+              onChange={(value) =>
+                setBody({ ...body, matchesPerPlayer: Number(value) })
+              }
+            />
+          </div>
+          <div className="recent-group">
+            <RecentRiotIdSearches
+              history={riotIdHistory}
+              onPick={applyHistoryItem}
+            />
+          </div>
+        </div>
+        <div className="filter-foot">
+          <button
+            className="primary-action"
+            type="submit"
+            disabled={jobActive || !jobCenterReady}
+          >
+            <UploadCloud size={16} />
+            {!jobCenterReady
+              ? "기존 작업 확인 중"
+              : jobActive
+                ? "수집 중"
+                : "수집 실행"}
+          </button>
+        </div>
       </form>
       <JobProgress job={trackedJob} error={completion.error} />
       {payload && (
@@ -2360,18 +2369,12 @@ function DbLookupWorkspace({
   return (
     <section className="screen">
       <WorkspaceHeader
-        eyebrow="저장된 매치업"
         title="저장된 매치업 조회"
         description="이미 수집된 경기에서 메모 유저 또는 입력한 유저의 매치업 통계와 목록을 빠르게 확인해요."
       />
-      <form
-        className={`control-panel db-panel ${
-          body.periodKind === meta.customPeriodLabel ? "custom-period" : ""
-        }`}
-        onSubmit={submit}
-      >
-        <div className="multi-riot-id-field">
-          <label className="field textarea-field">
+      <form className="filter-panel" onSubmit={submit}>
+        <div className="filter-target">
+          <label className="field">
             <span>조회 유저 목록</span>
             <textarea
               ref={textareaRef}
@@ -2388,20 +2391,16 @@ function DbLookupWorkspace({
             onPick={applyMemoGroup}
           />
         </div>
-        <div className="my-champion-field">
-          <ChampionSelect
-            label="기준 챔피언"
-            value={body.myChampionKorean}
-            meta={meta}
-            onChange={(value) => setBody({ ...body, myChampionKorean: value })}
-          />
-          <RecentMyChampionSearches
-            history={myChampionHistory}
-            onPick={(value) => setBody({ ...body, myChampionKorean: value })}
-          />
-        </div>
-        <div className="enemy-filter-field">
-          <div className="enemy-filter-controls">
+        <div className="filter-conditions">
+          <div className="filter-fields">
+            <ChampionSelect
+              label="기준 챔피언"
+              value={body.myChampionKorean}
+              meta={meta}
+              onChange={(value) =>
+                setBody({ ...body, myChampionKorean: value })
+              }
+            />
             <SelectField
               label="상대 챔피언"
               value={body.enemyChampionKorean}
@@ -2425,28 +2424,40 @@ function DbLookupWorkspace({
               options={meta.dbPeriodOptions}
               onChange={(value) => setBody({ ...body, periodKind: value })}
             />
+            {body.periodKind === meta.customPeriodLabel && (
+              <div className="filter-dates">
+                <DateField
+                  label="시작일"
+                  value={body.customStart || ""}
+                  onChange={(value) => setBody({ ...body, customStart: value })}
+                />
+                <DateField
+                  label="종료일"
+                  value={body.customEnd || ""}
+                  onChange={(value) => setBody({ ...body, customEnd: value })}
+                />
+              </div>
+            )}
           </div>
-          <RecentEnemyChampionSearches
-            history={enemyChampionHistory}
-            onPick={(value) => setBody({ ...body, enemyChampionKorean: value })}
-          />
+          <div className="recent-group">
+            <RecentMyChampionSearches
+              history={myChampionHistory}
+              onPick={(value) => setBody({ ...body, myChampionKorean: value })}
+            />
+            <RecentEnemyChampionSearches
+              history={enemyChampionHistory}
+              onPick={(value) =>
+                setBody({ ...body, enemyChampionKorean: value })
+              }
+            />
+            <RecentRiotIdSearches
+              history={riotIdHistory}
+              onPick={applyHistoryItem}
+            />
+          </div>
         </div>
-        {body.periodKind === meta.customPeriodLabel && (
-          <div className="db-custom-period-fields">
-            <DateField
-              label="시작일"
-              value={body.customStart || ""}
-              onChange={(value) => setBody({ ...body, customStart: value })}
-            />
-            <DateField
-              label="종료일"
-              value={body.customEnd || ""}
-              onChange={(value) => setBody({ ...body, customEnd: value })}
-            />
-          </div>
-        )}
-        <div className="db-submit-area">
-          <label className="check-field db-filter-option">
+        <div className="filter-foot">
+          <label className="check-field">
             <input
               type="checkbox"
               checked={body.currentPatchOnly}
@@ -2456,20 +2467,11 @@ function DbLookupWorkspace({
             />
             <span>이번 패치만</span>
           </label>
-          <button
-            className="primary-action db-submit-action"
-            type="submit"
-            disabled={searching}
-          >
-            <Database size={18} />
+          <button className="primary-action" type="submit" disabled={searching}>
+            <Database size={16} />
             {searching ? "조회 중" : "저장된 경기 조회"}
           </button>
         </div>
-        <RecentRiotIdSearches
-          className="db-riot-history"
-          history={riotIdHistory}
-          onPick={applyHistoryItem}
-        />
       </form>
 
       {error && <div className="error-box">{error}</div>}
@@ -2534,6 +2536,8 @@ function DbLookupWorkspace({
             </button>
             <div className="pager">
               <button
+                type="button"
+                aria-label="이전 페이지"
                 disabled={payload.page <= 1 || searching}
                 onClick={() => movePage(payload.page - 1)}
               >
@@ -2543,6 +2547,8 @@ function DbLookupWorkspace({
                 {payload.page} / {pageCount}
               </span>
               <button
+                type="button"
+                aria-label="다음 페이지"
                 disabled={payload.page >= pageCount || searching}
                 onClick={() => movePage(payload.page + 1)}
               >
@@ -2689,7 +2695,6 @@ function PlayerMemoWorkspace({
   return (
     <section className="screen">
       <WorkspaceHeader
-        eyebrow="관심 유저"
         title="관심 유저 관리"
         description="저장된 매치업의 기본 대상과 앱 시작 수집 대상을 관리해요. 메모는 비워도 괜찮아요."
       />
@@ -2711,7 +2716,7 @@ function PlayerMemoWorkspace({
           />
         </label>
         <button className="primary-action" type="submit" disabled={saving}>
-          <Plus size={18} />
+          <Plus size={16} />
           추가
         </button>
       </form>
@@ -2949,17 +2954,14 @@ function MissingMemoPanel({
 }
 
 function WorkspaceHeader({
-  eyebrow,
   title,
   description,
 }: {
-  eyebrow: string;
   title: string;
   description: string;
 }) {
   return (
     <header className="workspace-header">
-      <span className="workspace-eyebrow">{eyebrow}</span>
       <h1>{title}</h1>
       <p>{description}</p>
     </header>
@@ -2975,7 +2977,7 @@ function MemoPlayerSelect({
 }) {
   const { items, loading, error } = state;
   return (
-    <label className="field memo-select-field">
+    <label className="field">
       <span>메모된 유저</span>
       <select
         value=""
@@ -3021,7 +3023,7 @@ function MemoGroupSelect({
   const allItems = groups.flatMap((group) => group.items);
 
   return (
-    <label className="field memo-group-select-field">
+    <label className="field">
       <span>메모 선택</span>
       <select
         value=""
@@ -3077,7 +3079,6 @@ function RecentHistoryWorkspace({
   return (
     <section className="screen">
       <WorkspaceHeader
-        eyebrow="최근검색 관리"
         title="최근검색 목록 정리"
         description="검색 화면에서는 최근검색을 고르는 데만 쓰고, 삭제는 여기서만 처리합니다."
       />
@@ -3172,12 +3173,10 @@ function HistoryManagerSection({
 }
 
 function RecentRiotIdSearches({
-  className = "",
   history,
   onPick,
   onRemove,
 }: {
-  className?: string;
   history: string[];
   onPick: (riotId: string) => void;
   onRemove?: (riotId: string) => void;
@@ -3186,14 +3185,8 @@ function RecentRiotIdSearches({
     return null;
   }
   return (
-    <div
-      className={`recent-searches ${className}`.trim()}
-      aria-label="최근검색"
-    >
-      <span>
-        <History size={14} />
-        최근검색
-      </span>
+    <div className="recent-searches" aria-label="최근검색">
+      <span>최근검색</span>
       <div>
         {history.map((item) => (
           <RecentHistoryChip
@@ -3220,10 +3213,7 @@ function RecentEnemyChampionSearches({
   const items = ["전체", ...history.filter((item) => item !== "전체")];
   return (
     <div className="recent-searches" aria-label="최근 상대 챔피언">
-      <span>
-        <History size={14} />
-        최근 상대 챔피언
-      </span>
+      <span>최근 상대 챔피언</span>
       <div>
         {items.map((item) => (
           <RecentHistoryChip
@@ -3249,14 +3239,8 @@ function RecentMyChampionSearches({
 }) {
   const items = ["전체", ...history.filter((item) => item !== "전체")];
   return (
-    <div
-      className="recent-searches compact-history"
-      aria-label="최근 기준 챔피언"
-    >
-      <span>
-        <History size={14} />
-        최근 기준 챔피언
-      </span>
+    <div className="recent-searches" aria-label="최근 기준 챔피언">
+      <span>최근 기준 챔피언</span>
       <div>
         {items.map((item) => (
           <RecentHistoryChip
@@ -3281,7 +3265,7 @@ function RecentHistoryChip({
   onRemove?: (item: string) => void;
 }) {
   return (
-    <span className={`recent-chip-wrap ${onRemove ? "" : "plain"}`.trim()}>
+    <span className="recent-chip-wrap">
       <button
         className="recent-chip"
         type="button"
@@ -3598,13 +3582,20 @@ function MatchResultList({
         <h2>결과 목록</h2>
         {clientPagination && (
           <div className="pager compact">
-            <button disabled={page <= 1} onClick={() => setPage(page - 1)}>
+            <button
+              type="button"
+              aria-label="이전 페이지"
+              disabled={page <= 1}
+              onClick={() => setPage(page - 1)}
+            >
               <ChevronLeft size={16} />
             </button>
             <span>
               {page} / {pageCount}
             </span>
             <button
+              type="button"
+              aria-label="다음 페이지"
               disabled={page >= pageCount}
               onClick={() => setPage(page + 1)}
             >
@@ -3681,7 +3672,9 @@ function MatchResultCard({
         <strong>{row.win ? "승리" : "패배"}</strong>
         <span title={matchDateTitle}>{matchDateLabel}</span>
         {patchVersion && (
-          <span title={row.game_version}>패치 {patchVersion}</span>
+          <span className="match-patch" title={row.game_version}>
+            패치 {patchVersion}
+          </span>
         )}
         <em>{secondsToMinutes(row.game_duration)}</em>
       </div>
@@ -3701,6 +3694,8 @@ function MatchResultCard({
             </p>
           </div>
         </div>
+      </div>
+      <div className="match-build">
         <div className="items">
           {(row.my_items || [])
             .slice(0, 7)
@@ -3716,8 +3711,8 @@ function MatchResultCard({
               ),
             )}
         </div>
+        <MatchQuickBuild row={row} />
       </div>
-      <MatchQuickBuild row={row} />
       <div className="enemy-summary">
         <img
           src={championIcon(meta.dataDragonVersion, row.enemy_champion_key)}
@@ -3742,6 +3737,7 @@ function MatchResultCard({
           target="_blank"
           rel="noreferrer"
           title="OP.GG 열기"
+          aria-label="OP.GG 열기"
         >
           <ExternalLink size={16} />
         </a>
@@ -3773,7 +3769,7 @@ function MatchQuickBuild({ row }: { row: MatchRow }) {
     <div className="quick-build">
       <div className="quick-runes">
         <div className="quick-rune-pages">
-          <div className="quick-rune-group primary">
+          <div className="quick-rune-group">
             {primaryRuneIcons.map((url, index) => (
               <img
                 key={`${url}-${index}`}
@@ -4089,7 +4085,7 @@ function MatchDetailPanel({
   }
   if (!detail) {
     return (
-      <div className="detail-panel">
+      <div className="detail-panel loading">
         내 컴퓨터에 저장된 기본 경기 정보를 불러오는 중이에요.
       </div>
     );
@@ -4105,28 +4101,30 @@ function MatchDetailPanel({
         : "필요한 상세 정보는 내 컴퓨터에 저장된 자료를 사용했어요.";
   return (
     <div className="detail-panel">
-      <p className="detail-load-source" role="status">
-        {sourceMessage}
-      </p>
-      <div className="detail-tabs" role="tablist" aria-label="매치 상세 탭">
-        <button
-          className={activeTab === "summary" ? "active" : ""}
-          onClick={() => setActiveTab("summary")}
-          type="button"
-          role="tab"
-          aria-selected={activeTab === "summary"}
-        >
-          종합
-        </button>
-        <button
-          className={activeTab === "build" ? "active" : ""}
-          onClick={() => setActiveTab("build")}
-          type="button"
-          role="tab"
-          aria-selected={activeTab === "build"}
-        >
-          빌드
-        </button>
+      <div className="detail-head">
+        <div className="detail-tabs" role="tablist" aria-label="매치 상세 탭">
+          <button
+            className={activeTab === "summary" ? "active" : ""}
+            onClick={() => setActiveTab("summary")}
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "summary"}
+          >
+            종합
+          </button>
+          <button
+            className={activeTab === "build" ? "active" : ""}
+            onClick={() => setActiveTab("build")}
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "build"}
+          >
+            빌드
+          </button>
+        </div>
+        <p className="detail-load-source" role="status">
+          {sourceMessage}
+        </p>
       </div>
       {(activePartError ||
         (activeTab === "summary" && detail.detailLoad.rankError)) && (
@@ -4342,8 +4340,8 @@ function TeamCompare({
 }) {
   return (
     <div className="team-compare">
-      <CompareBar label="Total Kill" left={ally.kills} right={enemy.kills} />
-      <CompareBar label="Total Gold" left={ally.gold} right={enemy.gold} />
+      <CompareBar label="총 킬" left={ally.kills} right={enemy.kills} />
+      <CompareBar label="총 골드" left={ally.gold} right={enemy.gold} />
     </div>
   );
 }
@@ -4568,7 +4566,7 @@ function StatShardBlock({
   fallbackIconUrls?: Array<string | null>;
 }) {
   return (
-    <div className="rune-page stat-shards">
+    <div className="rune-page">
       <div className="rune-page-title">
         <span>능력치 파편</span>
       </div>
