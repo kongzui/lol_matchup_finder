@@ -30,8 +30,6 @@ from src.db_search_service import (
 from src.export import (
     build_indexed_results_csv_bytes,
     build_indexed_results_filename,
-    build_results_csv_bytes,
-    build_results_filename,
 )
 from src.matchup_filter import extract_focus_view
 from src.multi_search_service import (
@@ -46,16 +44,11 @@ from src.multi_search_service import (
 )
 from src.riot_client import RiotApiError, RiotClient
 from src.search_service import (
-    DEFAULT_PERIOD_LABEL,
     PERIOD_CUSTOM_LABEL,
-    PERIOD_OPTIONS,
     SEARCH_ALL_LABEL,
-    SearchPayload,
-    SearchRequest,
     fetch_ranked_profile,
     fetch_match_timeline,
     index_memo_player_matches,
-    run_search,
 )
 from src.static_data import (
     StaticData,
@@ -70,21 +63,6 @@ from src.utils import RiotIdParseError, parse_riot_id
 
 
 JobStatus = Literal["queued", "running", "succeeded", "partial", "failed"]
-
-
-class SearchJobBody(BaseModel):
-    """개별유저검색 job 생성 요청."""
-
-    model_config = ConfigDict(populate_by_name=True)
-
-    riot_id_raw: str = Field(alias="riotIdRaw")
-    period_kind: str = Field(alias="periodKind", default=DEFAULT_PERIOD_LABEL)
-    custom_start: date | None = Field(alias="customStart", default=None)
-    custom_end: date | None = Field(alias="customEnd", default=None)
-    my_champion_korean: str = Field(alias="myChampionKorean")
-    enemy_champion_korean: str = Field(alias="enemyChampionKorean")
-    lane_label: str = Field(alias="laneLabel")
-    max_matches: int = Field(alias="maxMatches", default=100, ge=1, le=300)
 
 
 class MultiSearchJobBody(BaseModel):
@@ -420,20 +398,6 @@ def _default_dates(
 ) -> tuple[date, date]:
     today = date.today()
     return custom_start or today - timedelta(days=90), custom_end or today
-
-
-def _search_request(body: SearchJobBody) -> SearchRequest:
-    custom_start, custom_end = _default_dates(body.custom_start, body.custom_end)
-    return SearchRequest(
-        riot_id_raw=body.riot_id_raw,
-        period_kind=body.period_kind,
-        custom_start=custom_start,
-        custom_end=custom_end,
-        my_champion_korean=body.my_champion_korean,
-        enemy_champion_korean=body.enemy_champion_korean,
-        lane_label=body.lane_label,
-        max_matches=body.max_matches,
-    )
 
 
 def _resolve_db_target_users(
@@ -1460,8 +1424,6 @@ def _build_meta_options() -> dict[str, Any]:
     return {
         "champions": champions,
         "laneOptions": LANE_LABELS,
-        "periodOptions": PERIOD_OPTIONS,
-        "defaultPeriod": DEFAULT_PERIOD_LABEL,
         "customPeriodLabel": PERIOD_CUSTOM_LABEL,
         "dbPeriodOptions": DB_PERIOD_OPTIONS,
         "defaultDbPeriod": DB_DEFAULT_PERIOD_LABEL,
@@ -1511,45 +1473,6 @@ def refresh_meta() -> dict[str, Any]:
     """Data Dragon 정적 데이터를 즉시 갱신하고 메타 옵션을 반환한다."""
     _refresh_data_dragon_resources(force_refresh=True, check_latest=True)
     return _build_meta_options()
-
-
-@app.post("/api/jobs/search")
-def create_search_job(body: SearchJobBody) -> dict[str, str]:
-    """개별유저검색 job을 생성한다."""
-    request = _search_request(body)
-
-    def runner(job: JobRecord) -> None:
-        def progress_cb(value: float) -> None:
-            _jobs.update(job.job_id, progress=min(max(value, 0.0), 1.0))
-
-        def status_cb(message: str) -> None:
-            _jobs.update(job.job_id, message=message)
-
-        result = run_search(
-            config=_get_config(),
-            request=request,
-            champion_data=_get_champion_data(),
-            cache=_get_cache(),
-            progress_cb=progress_cb,
-            status_cb=status_cb,
-        )
-        _jobs.update(
-            job.job_id,
-            status="succeeded",
-            progress=1.0,
-            message="검색 완료",
-            result=result,
-        )
-
-    job = _jobs.create(
-        "search",
-        runner,
-        origin="individual-search",
-        title="한 명 빠른 검색",
-        target_summary=body.riot_id_raw.strip(),
-        dedupe_key=f"search:{body.model_dump_json(by_alias=True)}",
-    )
-    return {"jobId": job.job_id}
 
 
 @app.post("/api/jobs/multi-search")
@@ -1933,23 +1856,6 @@ def get_match_rank_detail(
             "rankError": rank_load["error"],
         },
     }
-
-
-@app.get("/api/exports/search/{job_id}.csv")
-def export_search_csv(job_id: str) -> Response:
-    """완료된 개별유저검색 결과를 CSV로 반환한다."""
-    job = _jobs.get(job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail="job을 찾을 수 없습니다.")
-    if job.status != "succeeded" or not isinstance(job.result, SearchPayload):
-        raise HTTPException(status_code=409, detail="내보낼 검색 결과가 없습니다.")
-    return Response(
-        content=build_results_csv_bytes(job.result),
-        media_type="text/csv; charset=utf-8",
-        headers={
-            "Content-Disposition": f'attachment; filename="{build_results_filename(job.result)}"'
-        },
-    )
 
 
 @app.post("/api/exports/db-search.csv")

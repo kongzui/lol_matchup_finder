@@ -11,8 +11,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from .utils import format_riot_id, unix_to_kst_date_str
-
 
 def _participant_detail(p: dict[str, Any]) -> dict[str, Any]:
     """매치 상세 패널에서 라이너 한 명을 그릴 때 필요한 필드만 추려서 반환한다."""
@@ -119,95 +117,4 @@ def extract_focus_view(
         "enemy_laner": _participant_detail(enemy_laner) if enemy_laner else None,
         "others_ally": others_ally,
         "others_enemy": others_enemy,
-    }
-
-
-def extract_matchup_result(
-    match: dict[str, Any],
-    target_puuid: str,
-    my_champion_key: str | None,
-    enemy_champion_key: str | None,
-    lane: str,
-) -> dict[str, Any] | None:
-    """조건에 맞으면 결과 row를, 아니면 None을 반환한다."""
-    if not isinstance(match, dict):
-        return None
-
-    info = match.get("info") or {}
-    metadata = match.get("metadata") or {}
-    participants = info.get("participants") or []
-
-    me = next(
-        (p for p in participants if p.get("puuid") == target_puuid),
-        None,
-    )
-    if me is None:
-        return None
-
-    if my_champion_key and me.get("championName") != my_champion_key:
-        return None
-
-    if me.get("teamPosition") != lane:
-        return None
-
-    enemy_laner = next(
-        (
-            p
-            for p in participants
-            if p.get("teamId") != me.get("teamId") and p.get("teamPosition") == lane
-        ),
-        None,
-    )
-    if enemy_laner is None:
-        return None
-
-    if enemy_champion_key and enemy_laner.get("championName") != enemy_champion_key:
-        return None
-
-    enemy_game_name = enemy_laner.get("riotIdGameName")
-    enemy_tag_line = enemy_laner.get("riotIdTagline")
-    enemy_riot_id = format_riot_id(enemy_game_name, enemy_tag_line)
-    if enemy_riot_id is None:
-        # Riot ID가 비어 있으면 summonerName을 fallback으로 사용한다.
-        enemy_riot_id = enemy_laner.get("summonerName") or "Unknown"
-
-    cs = (me.get("totalMinionsKilled") or 0) + (me.get("neutralMinionsKilled") or 0)
-    me_detail = _participant_detail(me)
-
-    return {
-        "match_id": metadata.get("matchId"),
-        "game_creation": info.get("gameCreation"),
-        "game_date": (
-            unix_to_kst_date_str(info.get("gameCreation"))
-            if info.get("gameCreation")
-            else ""
-        ),
-        "queue_id": info.get("queueId"),
-        "player_puuid": me.get("puuid"),
-        "my_champion_key": me.get("championName"),
-        "enemy_puuid": enemy_laner.get("puuid"),
-        "enemy_champion_key": enemy_laner.get("championName"),
-        "enemy_riot_id": enemy_riot_id,
-        "enemy_game_name": enemy_game_name,
-        "enemy_tag_line": enemy_tag_line,
-        "win": bool(me.get("win")),
-        "kills": int(me.get("kills") or 0),
-        "deaths": int(me.get("deaths") or 0),
-        "assists": int(me.get("assists") or 0),
-        "cs": int(cs),
-        "gold_earned": int(me.get("goldEarned") or 0),
-        "damage_to_champions": int(me.get("totalDamageDealtToChampions") or 0),
-        "game_duration": int(info.get("gameDuration") or 0),
-        "game_version": info.get("gameVersion"),
-        "my_champion_level": me_detail["champion_level"],
-        "my_summoner1_id": me_detail["summoner1_id"],
-        "my_summoner2_id": me_detail["summoner2_id"],
-        "my_items": me_detail["items"],
-        "my_primary_tree_id": me_detail["primary_tree_id"],
-        "my_primary_runes": me_detail["primary_runes"],
-        "my_secondary_tree_id": me_detail["secondary_tree_id"],
-        "my_secondary_runes": me_detail["secondary_runes"],
-        "my_stat_offense": me_detail["stat_offense"],
-        "my_stat_flex": me_detail["stat_flex"],
-        "my_stat_defense": me_detail["stat_defense"],
     }

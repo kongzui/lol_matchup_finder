@@ -435,43 +435,6 @@ class MatchCache:
             conn.commit()
 
     # --- search_history ---
-    def record_search(
-        self,
-        target_riot_id: str,
-        target_puuid: str,
-        queue_id: int,
-        my_champion: str,
-        enemy_champion: str,
-        lane: str,
-        start_time: int,
-        end_time: int,
-        result_count: int,
-    ) -> None:
-        now = int(time.time())
-        with self._connect() as conn:
-            conn.execute(
-                """
-                INSERT INTO search_history (
-                    target_riot_id, target_puuid, queue_id,
-                    my_champion, enemy_champion, lane,
-                    start_time, end_time, result_count, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    target_riot_id,
-                    target_puuid,
-                    queue_id,
-                    my_champion,
-                    enemy_champion,
-                    lane,
-                    start_time,
-                    end_time,
-                    result_count,
-                    now,
-                ),
-            )
-            conn.commit()
-
     def get_latest_search_riot_id(self) -> str | None:
         """가장 최근 검색한 Riot ID를 반환한다."""
         with self._connect() as conn:

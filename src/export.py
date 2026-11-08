@@ -7,35 +7,6 @@ import io
 import pandas as pd
 
 from .db_search_service import IndexedMatchupSearchPayload
-from .search_service import SearchPayload
-
-
-def build_results_csv_bytes(payload: SearchPayload) -> bytes:
-    """검색 결과를 Excel에서 열기 쉬운 UTF-8 BOM CSV 바이트로 만든다."""
-    csv_rows = [
-        {
-            "game_date": row["game_date"],
-            "player_memo": payload.memos.get(row.get("player_puuid") or ""),
-            "my_champion": row["my_champion_key"],
-            "enemy_memo": payload.memos.get(row.get("enemy_puuid") or ""),
-            "enemy_champion": row["enemy_champion_key"],
-            "enemy_riot_id": row["enemy_riot_id"],
-            "result": "win" if row["win"] else "loss",
-            "match_id": row["match_id"] or "",
-        }
-        for row in payload.results
-    ]
-    csv_df = pd.DataFrame(csv_rows)
-    csv_buffer = io.StringIO()
-    csv_df.to_csv(csv_buffer, index=False, encoding="utf-8")
-    return csv_buffer.getvalue().encode("utf-8-sig")
-
-
-def build_results_filename(payload: SearchPayload) -> str:
-    """검색 조건 기반 CSV 파일명을 만든다."""
-    my = payload.my_champion_key or "All"
-    enemy = payload.enemy_champion_key or "All"
-    return f"matchup_{my}_vs_{enemy}.csv"
 
 
 def build_indexed_results_csv_bytes(payload: IndexedMatchupSearchPayload) -> bytes:

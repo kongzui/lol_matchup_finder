@@ -7,8 +7,6 @@ export interface ChampionOption {
 export interface MetaOptions {
   champions: ChampionOption[];
   laneOptions: string[];
-  periodOptions: string[];
-  defaultPeriod: string;
   customPeriodLabel: string;
   dbPeriodOptions: string[];
   defaultDbPeriod: string;
