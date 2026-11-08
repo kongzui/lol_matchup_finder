@@ -2,13 +2,14 @@
 
 - Account-V1: Riot ID → PUUID
 - Match-V5: matchId 목록, matchId → 상세 JSON, matchId → 타임라인 JSON
-- 429 응답 시 Retry-After 헤더에 따라 한 번 대기 후 재시도한다.
+- 429 응답 시 Retry-After 헤더만큼 기다렸다가 같은 요청을 이어서 보낸다.
 - 403/404 등은 의미 있는 예외로 변환한다.
 """
 
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from threading import Lock
 from typing import Any
 from urllib.parse import quote
@@ -17,9 +18,10 @@ import httpx
 
 
 DEFAULT_TIMEOUT = 10.0
-MAX_RETRY_429 = 2
+MAX_RETRY_SERVER_ERROR = 2
 DEFAULT_BACKOFF_SECONDS = 5.0
-MAX_RETRY_AFTER_SECONDS = 120.0
+# 한 요청이 호출 제한이 풀리기를 기다릴 수 있는 시간의 합
+MAX_RATE_LIMIT_WAIT_SECONDS = 15 * 60.0
 _RIOT_REQUEST_LOCK = Lock()
 
 
@@ -57,6 +59,7 @@ class RiotClient:
         platform: str = "kr",
         timeout: float = DEFAULT_TIMEOUT,
         sleep_func=time.sleep,
+        rate_limit_wait_cb: Callable[[float], None] | None = None,
     ):
         if not api_key:
             raise RiotApiError("RIOT_API_KEY가 설정되어 있지 않습니다.")
@@ -65,6 +68,7 @@ class RiotClient:
         self._platform = platform
         self._timeout = timeout
         self._sleep = sleep_func
+        self._rate_limit_wait_cb = rate_limit_wait_cb
         self._client: httpx.Client | None = None
         self.request_count = 0
 
@@ -198,7 +202,8 @@ class RiotClient:
         not_found_message: str | None = None,
     ) -> Any:
         client = self._ensure_client()
-        attempts = 0
+        server_error_attempts = 0
+        rate_limit_waited = 0.0
 
         with _RIOT_REQUEST_LOCK:
             while True:
@@ -231,22 +236,26 @@ class RiotClient:
                         status_code=status,
                     )
 
-                if status == 429 and attempts < MAX_RETRY_429:
-                    attempts += 1
+                if status == 429:
                     wait_s = self._parse_retry_after(resp.headers.get("Retry-After"))
+                    rate_limit_waited += wait_s
+                    if rate_limit_waited > MAX_RATE_LIMIT_WAIT_SECONDS:
+                        raise RiotApiRateLimited(
+                            "Riot API 호출 제한이 오래 풀리지 않습니다. "
+                            "잠시 후 다시 시도해주세요.",
+                            status_code=status,
+                        )
+                    if self._rate_limit_wait_cb is not None:
+                        self._rate_limit_wait_cb(wait_s)
                     self._sleep(wait_s)
                     continue
 
-                if status == 429:
-                    raise RiotApiRateLimited(
-                        "Riot API 호출 제한에 도달했습니다. "
-                        "잠시 후 다시 시도하거나, 검색 기간을 줄여주세요.",
-                        status_code=status,
-                    )
-
-                if 500 <= status < 600 and attempts < MAX_RETRY_429:
+                if (
+                    500 <= status < 600
+                    and server_error_attempts < MAX_RETRY_SERVER_ERROR
+                ):
                     # 일시적 서버 오류는 짧게 한 번 재시도한다.
-                    attempts += 1
+                    server_error_attempts += 1
                     self._sleep(DEFAULT_BACKOFF_SECONDS)
                     continue
 
@@ -260,6 +269,6 @@ class RiotClient:
         if not value:
             return DEFAULT_BACKOFF_SECONDS
         try:
-            return min(MAX_RETRY_AFTER_SECONDS, max(1.0, float(value)))
+            return max(1.0, float(value))
         except ValueError:
             return DEFAULT_BACKOFF_SECONDS

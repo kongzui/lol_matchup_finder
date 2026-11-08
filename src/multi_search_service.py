@@ -173,10 +173,16 @@ def _run_multi_search_unlocked(
     seen_match_ids: set[str] = set()
     continued_puuids: set[str] = set()
 
+    def report_rate_limit_wait(wait_seconds: float) -> None:
+        status_cb(
+            f"Riot 호출 제한으로 {wait_seconds:.0f}초 기다린 뒤 이어서 받는 중..."
+        )
+
     with RiotClient(
         api_key=config.api_key,
         region=config.region,
         platform=config.platform,
+        rate_limit_wait_cb=report_rate_limit_wait,
     ) as client:
         resolved_accounts: list[dict[str, Any]] = []
         seen_puuids: set[str] = set()

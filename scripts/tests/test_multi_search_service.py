@@ -2,6 +2,7 @@
 
 import unittest
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import Mock, patch
 
 from src.multi_search_service import (
@@ -15,8 +16,10 @@ from src.riot_client import RiotApiAuthError, RiotApiError, RiotApiRateLimited
 class _FakeRiotClient:
     """외부 연결 없이 컨텍스트 관리자 동작만 제공한다."""
 
-    def __init__(self, **_kwargs: object) -> None:
-        pass
+    last_kwargs: dict[str, Any] = {}
+
+    def __init__(self, **kwargs: Any) -> None:
+        type(self).last_kwargs = kwargs
 
     def __enter__(self) -> "_FakeRiotClient":
         return self
@@ -123,6 +126,7 @@ class MultiSearchCompletionTests(unittest.TestCase):
     """경기 저장이 끝난 사람만 성공으로 기록되는지 검증한다."""
 
     def setUp(self) -> None:
+        self.status_messages: list[str] = []
         self.config = SimpleNamespace(
             api_key="test-key",
             region="asia",
@@ -180,10 +184,26 @@ class MultiSearchCompletionTests(unittest.TestCase):
                 request=request,
                 cache=cache,
                 progress_cb=lambda _value: None,
-                status_cb=lambda _message: None,
+                status_cb=self.status_messages.append,
             )
 
         return payload, cache
+
+    def test_rate_limit_wait_is_shown_and_collection_continues(self) -> None:
+        def fetch_ids(**_kwargs: object) -> list[str]:
+            _FakeRiotClient.last_kwargs["rate_limit_wait_cb"](120.0)
+            return ["KR_1"]
+
+        payload, _cache = self._run(
+            riot_ids_raw="One#KR1",
+            fetch_ids=fetch_ids,
+            fetch_detail=lambda *_args: {"match_id": "KR_1"},
+        )
+
+        self.assertEqual(payload.success_count, 1)
+        self.assertTrue(
+            any("호출 제한으로 120초" in text for text in self.status_messages)
+        )
 
     def test_marks_success_after_detail_is_indexed(self) -> None:
         payload, cache = self._run(
