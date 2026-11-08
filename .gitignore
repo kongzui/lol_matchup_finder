@@ -8,6 +8,7 @@ data/*.db
 data/*.db-journal
 .vscode/
 .idea/
+.claude/
 frontend/node_modules/
 frontend/dist/
 frontend/*.tsbuildinfo

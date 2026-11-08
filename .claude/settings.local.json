@@ -1,7 +1,0 @@
-{
-  "permissions": {
-    "defaultMode": "auto",
-    "allow": ["Bash(*)"],
-    "deny": ["Bash(rm -rf *)", "Bash(rm -f *)", "Bash(git push *--force*)", "Bash(git push *-f*)"]
-  }
-}
