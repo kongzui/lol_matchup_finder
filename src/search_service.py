@@ -301,6 +301,27 @@ def ensure_match_indexed(
         return indexed_rows, indexed_rows > 0
 
 
+def index_memo_player_matches(
+    cache: MatchCache,
+    queue_id: int,
+    puuid: str | None = None,
+) -> int:
+    """관심 유저의 저장 경기는 티어와 관계없이 조회 항목으로 채운다."""
+    indexed_rows = 0
+    for match_id in cache.list_unindexed_memo_match_ids(puuid):
+        match = cache.get_match(match_id)
+        if match is None:
+            continue
+        added_rows, _available = ensure_match_indexed(
+            cache,
+            match,
+            match_id=match_id,
+            queue_id=queue_id,
+        )
+        indexed_rows += added_rows
+    return indexed_rows
+
+
 def _is_index_allowed(profile: dict[str, Any] | None) -> bool:
     tier = str((profile or {}).get("tier") or "").upper()
     min_tier_value = TIER_ORDER[INDEX_MIN_TIER]
@@ -466,7 +487,9 @@ def _run_search_unlocked(
             puuid,
             config.queue_id,
         )
-        index_allowed = _is_index_allowed(ranked_profile)
+        index_allowed = cache.get_player_memo(puuid) is not None or _is_index_allowed(
+            ranked_profile
+        )
 
         status_cb("솔로 랭크 경기 목록을 확인하는 중...")
         match_ids = fetch_all_match_ids(

@@ -54,6 +54,7 @@ from src.search_service import (
     SearchRequest,
     fetch_ranked_profile,
     fetch_match_timeline,
+    index_memo_player_matches,
     run_search,
 )
 from src.static_data import (
@@ -127,6 +128,7 @@ class DbSearchBody(BaseModel):
     custom_end: date | None = Field(alias="customEnd", default=None)
     current_patch_only: bool = Field(alias="currentPatchOnly", default=False)
     riot_ids_raw: str = Field(alias="riotIdsRaw", default="")
+    target_puuids: list[str] = Field(alias="targetPuuids", default_factory=list)
     page: int = Field(default=1, ge=1)
     page_size: int = Field(alias="pageSize", default=50, ge=1, le=200)
     snapshot: DbSearchSnapshotBody | None = None
@@ -475,8 +477,8 @@ def _resolve_db_target_users(
         if registered is None:
             raise RiotApiError(
                 f"내 컴퓨터에 저장된 유저가 아니에요: {game_name}#{tag_line}. "
-                "먼저 '개별 유저 검색' 또는 '유저 매치 수집'에서 "
-                "새 데이터 가져오기를 실행해 주세요."
+                "'Riot에서 최신 경기 가져오기' 또는 '새 데이터 가져오기'로 "
+                "이 유저의 경기를 먼저 모아 주세요."
             )
         cache_hits += 1
         accounts.append(
@@ -569,6 +571,28 @@ def _resolve_player_memo_target(body: ResolveRiotIdBody) -> dict[str, Any]:
     }
 
 
+def _db_target_label(
+    selected_puuids: tuple[str, ...],
+    typed_count: int,
+    *,
+    cache: MatchCache,
+) -> str:
+    """고른 사람과 직접 입력 수로 조회 대상 이름을 만든다."""
+    parts: list[str] = []
+    if selected_puuids:
+        memos = cache.get_player_memos(list(selected_puuids))
+        people = {memos.get(puuid, "").strip() for puuid in selected_puuids}
+        if len(people) > 1:
+            parts.append(f"관심 유저 {len(people)}명")
+        else:
+            name = next(iter(people)) or "메모 없음"
+            count = len(selected_puuids)
+            parts.append(f"{name} · 계정 {count}개" if count > 1 else name)
+    if typed_count:
+        parts.append(f"입력 유저 {typed_count}명")
+    return " + ".join(parts)
+
+
 def _db_request(
     body: DbSearchBody,
     *,
@@ -586,8 +610,14 @@ def _db_request(
             body,
             cache=cache,
         )
-        if body.riot_ids_raw.strip():
-            target_label = f"입력 유저 {len(target_puuids)}명"
+        selected_puuids = tuple(dict.fromkeys(body.target_puuids))
+        if body.riot_ids_raw.strip() or selected_puuids:
+            target_label = _db_target_label(
+                selected_puuids,
+                len(target_puuids),
+                cache=cache,
+            )
+            target_puuids = tuple(dict.fromkeys((*selected_puuids, *target_puuids)))
         else:
             target_puuids = tuple(
                 dict.fromkeys(item["puuid"] for item in cache.list_player_memos())
@@ -1464,6 +1494,7 @@ def _build_meta_options() -> dict[str, Any]:
 def start_application() -> dict[str, Any]:
     """앱 시작 준비와 자동 수집 조건 확인을 명시적으로 실행한다."""
     _ensure_data_dragon_checked()
+    index_memo_player_matches(_get_cache(), _get_config().queue_id)
     _maybe_start_auto_refresh()
     return _build_meta_options()
 
@@ -1703,6 +1734,7 @@ def resolve_player_memo_riot_id(body: ResolveRiotIdBody) -> dict[str, Any]:
 def upsert_player_memo(puuid: str, body: PlayerMemoBody) -> dict[str, bool]:
     """관심 유저 메모를 저장한다."""
     _get_cache().upsert_player_memo(puuid, body.memo)
+    index_memo_player_matches(_get_cache(), _get_config().queue_id, puuid)
     return {"ok": True}
 
 

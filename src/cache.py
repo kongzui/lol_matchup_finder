@@ -1344,6 +1344,26 @@ class MatchCache:
 
         return indexed
 
+    def list_unindexed_memo_match_ids(self, puuid: str | None = None) -> list[str]:
+        """관심 유저가 출처인 저장 경기 중 조회 항목이 없는 경기 ID를 반환한다."""
+        player_filter = "AND pm.puuid = ?" if puuid is not None else ""
+        params = (puuid,) if puuid is not None else ()
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT DISTINCT md.match_id
+                FROM match_discovery md
+                JOIN player_memo pm ON pm.puuid = md.source_puuid
+                JOIN match_cache mc ON mc.match_id = md.match_id
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM matchup_index mi WHERE mi.match_id = md.match_id
+                )
+                {player_filter}
+                """,
+                params,
+            ).fetchall()
+        return [row["match_id"] for row in rows]
+
     def _get_match_discoveries(self, match_id: str) -> list[dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute(
