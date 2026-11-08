@@ -44,11 +44,15 @@ class PlayerMatchCollectionPlanTests(unittest.TestCase):
         )
 
     def test_recent_database_still_has_manual_collection_plan(self) -> None:
-        self.assertEqual(_collection_plan(0), (1, 5, False))
-        self.assertEqual(_collection_plan(2), (2, 10, False))
+        self.assertEqual(_collection_plan(0), (1, 15, False))
+        self.assertEqual(_collection_plan(2), (2, 30, False))
+
+    def test_long_gaps_stop_at_the_per_player_limit(self) -> None:
+        self.assertEqual(_collection_plan(19), (19, 285, False))
+        self.assertEqual(_collection_plan(21), (21, 300, False))
 
     def test_59_days_uses_automatic_calculation(self) -> None:
-        self.assertEqual(_collection_plan(59), (59, 295, False))
+        self.assertEqual(_collection_plan(59), (59, 300, False))
 
     def test_60_days_requires_90_day_confirmation(self) -> None:
         self.assertEqual(
@@ -89,12 +93,28 @@ class PlayerMatchCollectionPlanTests(unittest.TestCase):
 
         self.assertEqual([target["puuid"] for target in planned], ["old", "never"])
         self.assertEqual(planned[0]["collection_days"], 10)
-        self.assertEqual(planned[0]["collection_matches_per_player"], 50)
+        self.assertEqual(planned[0]["collection_matches_per_player"], 150)
         self.assertEqual(planned[1]["collection_days"], DEFAULT_MULTI_SEARCH_DAYS)
         self.assertEqual(
             planned[1]["collection_matches_per_player"],
             DEFAULT_MULTI_MATCHES_PER_PLAYER,
         )
+
+    def test_auto_plan_collects_once_a_full_day_has_passed(self) -> None:
+        now = 1_800_000_000
+        targets = [
+            {"puuid": "today", "last_collected_at": now - 86_400},
+            {"puuid": "yesterday", "last_collected_at": now - 86_401},
+        ]
+
+        planned = _plan_collection_targets(
+            targets,
+            include_recent=False,
+            now=now,
+        )
+
+        self.assertEqual([target["puuid"] for target in planned], ["yesterday"])
+        self.assertEqual(planned[0]["collection_days"], 2)
 
     def test_pending_collection_is_planned_even_when_last_success_is_recent(
         self,
@@ -458,12 +478,12 @@ class PlayerMatchCollectionRequestTests(unittest.TestCase):
                 {
                     **old,
                     "collection_days": 10,
-                    "collection_matches_per_player": 50,
+                    "collection_matches_per_player": 150,
                     "requires_confirmation": False,
                 }
             ],
             days=10,
-            matches_per_player=50,
+            matches_per_player=150,
             origin="startup-auto",
         )
 
