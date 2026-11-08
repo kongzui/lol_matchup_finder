@@ -205,6 +205,12 @@ function itemIcon(version: string, itemId: number): string {
   return `https://ddragon.leagueoflegends.com/cdn/${version}/img/item/${itemId}.png`;
 }
 
+function championName(meta: MetaOptions, key?: string | null): string {
+  return (
+    meta.champions.find((item) => item.key === key)?.koreanName || key || ""
+  );
+}
+
 function opggUrl(gameName?: string, tagLine?: string): string {
   if (!gameName || !tagLine) {
     return "";
@@ -1536,7 +1542,11 @@ function MultiCollectWorkspace({
           <button
             className="primary-action"
             type="submit"
-            disabled={jobActive || !jobCenterReady}
+            disabled={
+              jobActive ||
+              !jobCenterReady ||
+              splitRiotIdInput(body.riotIdsRaw).length === 0
+            }
           >
             <UploadCloud size={16} />
             {!jobCenterReady
@@ -2136,7 +2146,7 @@ function DbLookupWorkspace({
       )}
       {payload && (
         <>
-          <DbSummary payload={payload} />
+          <DbSummary payload={payload} champions={meta} />
           <div className="toolbar">
             <button
               className="tool-button"
@@ -3080,10 +3090,16 @@ function CollectionFailures({
   );
 }
 
-function DbSummary({ payload }: { payload: DbSearchPayload }) {
+function DbSummary({
+  payload,
+  champions,
+}: {
+  payload: DbSearchPayload;
+  champions: MetaOptions;
+}) {
   return (
     <SummaryGrid
-      title={`${payload.my_champion_key || "전체"} vs ${payload.enemy_champion_key || "전체"}`}
+      title={`${championName(champions, payload.my_champion_key) || "전체"} vs ${championName(champions, payload.enemy_champion_key) || "전체"}`}
       meta={`${payload.lane_label} · ${payload.period_kind} · ${
         payload.patch_prefix || "전체 패치"
       }`}
@@ -3285,7 +3301,7 @@ function MatchResultCard({
           <span>상대 라이너</span>
           <strong>{withMemo(enemyName || "-", enemyMemo)}</strong>
           <em>
-            #{enemyTag || "-"} · {row.enemy_champion_key}
+            #{enemyTag || "-"} · {championName(meta, row.enemy_champion_key)}
           </em>
         </div>
       </div>
@@ -3664,19 +3680,29 @@ function MatchSummaryTab({ detail }: { detail: MatchDetail }) {
     <div className="match-summary-tab">
       <div className="team-tables">
         <TeamTable
-          title={detail.me.win ? "승리 (블루팀)" : "패배 (블루팀)"}
+          title={teamTitle(allyPlayers[0])}
           players={allyPlayers}
           maxDamage={maxDamage}
         />
-        <TeamCompare ally={allyTotals} enemy={enemyTotals} />
+        <TeamCompare
+          ally={allyTotals}
+          enemy={enemyTotals}
+          allyIsRed={allyPlayers[0]?.team_id === 200}
+        />
         <TeamTable
-          title={detail.enemyLaner?.win ? "승리 (레드팀)" : "패배 (레드팀)"}
+          title={teamTitle(enemyPlayers[0])}
           players={enemyPlayers}
           maxDamage={maxDamage}
         />
       </div>
     </div>
   );
+}
+
+function teamTitle(player?: DetailPlayer): string {
+  return `${player?.win ? "승리" : "패배"} (${
+    player?.team_id === 200 ? "레드팀" : "블루팀"
+  })`;
 }
 
 function sortTeam(players: DetailPlayer[]): DetailPlayer[] {
@@ -3836,12 +3862,14 @@ function ItemStrip({ urls = [] }: { urls?: Array<string | null> }) {
 function TeamCompare({
   ally,
   enemy,
+  allyIsRed,
 }: {
   ally: { kills: number; gold: number };
   enemy: { kills: number; gold: number };
+  allyIsRed: boolean;
 }) {
   return (
-    <div className="team-compare">
+    <div className={`team-compare ${allyIsRed ? "ally-red" : ""}`}>
       <CompareBar label="총 킬" left={ally.kills} right={enemy.kills} />
       <CompareBar label="총 골드" left={ally.gold} right={enemy.gold} />
     </div>

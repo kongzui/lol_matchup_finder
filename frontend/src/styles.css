@@ -1659,6 +1659,14 @@ input[type="checkbox"] {
   background: var(--loss);
 }
 
+.team-compare.ally-red .compare-left {
+  background: var(--loss);
+}
+
+.team-compare.ally-red .compare-right {
+  background: var(--win);
+}
+
 /* 빌드 탭 */
 .build-tab {
   display: grid;
