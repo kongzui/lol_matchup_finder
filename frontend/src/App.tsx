@@ -183,24 +183,6 @@ function dbLastMatchText(timestamp?: number | null): string {
   }).format(new Date(timestamp));
 }
 
-function playerMatchCollectionSummary(meta: MetaOptions): string {
-  const refresh = meta.autoRefresh;
-  if (refresh.status === "running" && refresh.plannedTargetCount) {
-    return `${refresh.plannedTargetCount}명 매치 수집 중`;
-  }
-  return refresh.message;
-}
-
-function playerMatchCollectionScope(meta: MetaOptions): string {
-  const lastCollected = meta.autoRefresh.lastCollectedAt
-    ? memoDate(meta.autoRefresh.lastCollectedAt)
-    : "기록 없음";
-  const planned = meta.autoRefresh.plannedTargetCount
-    ? ` · 이번 대상 ${meta.autoRefresh.plannedTargetCount}명`
-    : "";
-  return `설정 ${meta.autoRefresh.targetCount}명${planned} · 가장 최근 완료 ${lastCollected}`;
-}
-
 function matchPatchVersion(row: MatchRow): string | null {
   const version = row.game_version?.trim();
   if (!version) {
@@ -849,9 +831,6 @@ export default function App() {
     });
   }, [meta]);
 
-  const autoRefreshJob = jobCenter.jobs.find(
-    (job) => job.jobId === meta?.autoRefresh.jobId,
-  );
   const selectedRecoveryJob = jobCenter.jobs.find(
     (job) => job.jobId === recoveryRequest.jobId,
   );
@@ -943,6 +922,12 @@ export default function App() {
     );
   }
 
+  const collecting =
+    collectionStarting || meta.autoRefresh.status === "running";
+  const collectionNeedsAttention = ["partial", "failed", "stale"].includes(
+    meta.autoRefresh.status,
+  );
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -987,131 +972,71 @@ export default function App() {
           </div>
         </nav>
         <div className="server-card">
-          <div className="server-card-head">
-            <div className="server-title">
-              <span>시스템 상태</span>
-              <strong>
-                {meta.apiKeyDetected
-                  ? "새 데이터 수집 가능"
-                  : "저장된 데이터만 조회 가능"}
-              </strong>
+          <section className="refresh-panel" aria-label="데이터 갱신">
+            <dl className="server-facts">
+              <div>
+                <dt>마지막 갱신</dt>
+                <dd>
+                  {dbLastMatchText(
+                    meta.autoRefresh.lastCollectedAt &&
+                      meta.autoRefresh.lastCollectedAt * 1000,
+                  )}
+                </dd>
+              </div>
+              <div>
+                <dt>마지막 경기</dt>
+                <dd>{dbLastMatchText(meta.dbLastIndexedMatchCreation)}</dd>
+              </div>
+            </dl>
+            <div className="refresh-actions">
+              <button
+                className="refresh-button"
+                type="button"
+                onClick={startPlayerMatchCollection}
+                disabled={
+                  collecting ||
+                  meta.autoRefresh.targetCount === 0 ||
+                  !meta.apiKeyDetected
+                }
+                title="앱 시작 시 수집이 켜진 관심 유저의 경기를 지금 가져와요"
+              >
+                <RefreshCw className={collecting ? "spin" : ""} size={15} />
+                <span>{collecting ? "경기 수집 중" : "경기 지금 수집"}</span>
+                <em>{meta.autoRefresh.targetCount}명</em>
+              </button>
+              <button
+                className="refresh-button"
+                type="button"
+                onClick={refreshMeta}
+                disabled={metaRefreshing}
+                title="챔피언·아이템·룬 정보를 최신 패치로 갱신해요"
+              >
+                <RefreshCw className={metaRefreshing ? "spin" : ""} size={15} />
+                <span>{metaRefreshing ? "확인 중" : "게임 정보 갱신"}</span>
+                <em>{meta.dataDragonVersion}</em>
+              </button>
             </div>
-            <span
-              className={meta.apiKeyDetected ? "status ok" : "status danger"}
-            >
-              <i aria-hidden="true" />
-              {meta.apiKeyDetected ? "준비됨" : "API 키 없음"}
-            </span>
-          </div>
-          <dl className="server-facts">
-            <div>
-              <dt>저장된 경기</dt>
-              <dd>
-                {meta.dbIndexedMatchCount.toLocaleString("ko-KR")}개 조회 가능
-                <small>
-                  원본 {meta.dbMatchCount.toLocaleString("ko-KR")}개
-                </small>
-              </dd>
-            </div>
-            <div>
-              <dt>마지막 경기</dt>
-              <dd>{dbLastMatchText(meta.dbLastIndexedMatchCreation)}</dd>
-            </div>
-            <div>
-              <dt>서버 환경</dt>
-              <dd>
-                {meta.region.toUpperCase()} · {meta.platform.toUpperCase()} ·
-                솔로 랭크 {meta.queueId}
-              </dd>
-            </div>
-            <div>
-              <dt>게임 정보 버전</dt>
-              <dd className="server-version">
-                {meta.dataDragonVersion}
-                <button
-                  className="icon-button compact"
-                  type="button"
-                  onClick={refreshMeta}
-                  disabled={metaRefreshing}
-                  title="게임 정보 갱신"
-                  aria-label="게임 정보 갱신"
-                >
-                  <RefreshCw
-                    className={metaRefreshing ? "spin" : ""}
-                    size={13}
-                  />
-                </button>
-              </dd>
-            </div>
-          </dl>
-          <div className={`server-match-collection ${meta.autoRefresh.status}`}>
-            <div className="server-collection-head">
-              <span>
-                <RefreshCw
-                  className={
-                    collectionStarting || meta.autoRefresh.status === "running"
-                      ? "spin"
-                      : ""
-                  }
-                  size={13}
-                />
-                자동 매치 수집
-              </span>
-              <em>{meta.autoRefresh.targetCount}명</em>
-            </div>
-            <strong className="server-collection-state">
-              {playerMatchCollectionSummary(meta)}
-            </strong>
-            <p className="server-collection-scope">
-              {playerMatchCollectionScope(meta)}
-            </p>
-            {meta.autoRefresh.requiresConfirmation && (
-              <p className="server-collection-confirmation">
-                이번에 필요한 {meta.autoRefresh.plannedTargetCount}명 중 오래
-                확인하지 않은 사람이 있어요. 지금 수집을 누르면 사람마다 최근
-                최대 {meta.autoRefresh.days}일 · 최대{" "}
-                {meta.autoRefresh.matchesPerPlayer}판을 확인해요.
+            {!meta.apiKeyDetected && (
+              <p className="server-error-text">
+                Riot API 키가 없어 저장된 경기만 볼 수 있어요.
               </p>
             )}
-            <button
-              className="server-collect-button"
-              type="button"
-              onClick={startPlayerMatchCollection}
-              disabled={
-                collectionStarting ||
-                meta.autoRefresh.status === "running" ||
-                meta.autoRefresh.targetCount === 0 ||
-                !meta.apiKeyDetected
-              }
-              title="설정된 유저의 매치를 지금 수집"
-            >
-              <RefreshCw size={13} />
-              {collectionStarting || meta.autoRefresh.status === "running"
-                ? "수집 중"
-                : "지금 수집"}
-            </button>
-            {meta.autoRefresh.status === "running" &&
-              meta.autoRefresh.days !== null &&
-              meta.autoRefresh.matchesPerPlayer !== null && (
-                <em>
-                  최근 {meta.autoRefresh.days}일 · 1인당 최대{" "}
-                  {meta.autoRefresh.matchesPerPlayer}판
-                </em>
-              )}
-            {autoRefreshJob && meta.autoRefresh.status === "running" && (
-              <em>
-                {Math.round(autoRefreshJob.progress * 100)}% ·{" "}
-                {autoRefreshJob.message || "진행 중"}
-              </em>
+            {meta.apiKeyDetected && meta.autoRefresh.targetCount === 0 && (
+              <p>관심 유저에서 '앱 시작 시 수집'을 켜면 수집할 수 있어요.</p>
             )}
-            {jobCenter.connectionMessage &&
-              meta.autoRefresh.status === "running" && (
-                <em className="server-error-text">
-                  {jobCenter.connectionMessage}
-                </em>
-              )}
+            {collectionNeedsAttention && (
+              <p className="server-warning-text">{meta.autoRefresh.message}</p>
+            )}
             {collectionStartError && (
-              <em className="server-error-text">{collectionStartError}</em>
+              <p className="server-error-text">{collectionStartError}</p>
+            )}
+            {metaRefreshError && (
+              <p className="server-error-text">{metaRefreshError}</p>
+            )}
+            {sharedRefreshError && (
+              <p className="server-error-text">
+                경기 데이터 현황 갱신 실패: {sharedRefreshError}
+              </p>
             )}
             {meta.autoRefresh.failures.length > 0 && (
               <details className="server-collection-failures">
@@ -1128,7 +1053,7 @@ export default function App() {
                 </div>
               </details>
             )}
-          </div>
+          </section>
           <JobCenterPanel
             activeJobs={jobCenter.activeJobs}
             recentJobs={jobCenter.recentJobs}
@@ -1143,14 +1068,6 @@ export default function App() {
               setActive("multi");
             }}
           />
-          {metaRefreshError && (
-            <p className="server-error-text">{metaRefreshError}</p>
-          )}
-          {sharedRefreshError && (
-            <p className="server-error-text">
-              경기 데이터 현황 갱신 실패: {sharedRefreshError}
-            </p>
-          )}
         </div>
       </aside>
 
@@ -1279,8 +1196,9 @@ function JobCenterPanel({
   connectionMessage: string | null;
   onOpen: (job: JobStatus) => void;
 }) {
-  const [showAllRecent, setShowAllRecent] = useState(false);
-  const visibleRecent = showAllRecent ? recentJobs : recentJobs.slice(0, 3);
+  const failedCount = recentJobs.filter(
+    (job) => job.status === "failed",
+  ).length;
   return (
     <section className="job-center">
       <p className="sr-only" role="status" aria-live="polite">
@@ -1288,13 +1206,6 @@ function JobCenterPanel({
           ? `${recentJobs[0].title} ${jobStatusText(recentJobs[0].status)}`
           : ""}
       </p>
-      <div className="job-center-head">
-        <span>경기 데이터 작업</span>
-        <strong>
-          {activeJobs.length ? `${activeJobs.length}개 진행 중` : "대기"}
-        </strong>
-      </div>
-      {connectionState === "loading" && <p>작업 기록을 확인하고 있어요.</p>}
       {connectionState === "reconnecting" && (
         <p className="server-error-text">
           {connectionMessage || "서버 작업에 다시 연결하고 있어요."}
@@ -1335,41 +1246,33 @@ function JobCenterPanel({
           )}
         </div>
       ))}
-      {visibleRecent.map((job) => (
-        <div className={`job-center-item ${job.status}`} key={job.jobId}>
-          <div>
-            <strong>{job.title}</strong>
-            <span>{job.targetSummary}</span>
-          </div>
-          <em>
-            {jobStatusText(job.status)} · {job.message}
-          </em>
-          {job.status === "failed" && job.error && (
-            <p className="server-error-text">{job.error}</p>
-          )}
-          {job.resultAvailable && isMultiCollectionJob(job) && (
-            <button type="button" onClick={() => onOpen(job)}>
-              결과 보기
-            </button>
-          )}
-        </div>
-      ))}
-      {recentJobs.length > 3 && (
-        <button
-          className="tool-button"
-          type="button"
-          aria-expanded={showAllRecent}
-          onClick={() => setShowAllRecent((current) => !current)}
-        >
-          {showAllRecent
-            ? "최근 작업 접기"
-            : `최근 작업 ${recentJobs.length}개 모두 보기`}
-        </button>
+      {recentJobs.length > 0 && (
+        <details className="job-history">
+          <summary>
+            최근 작업 {recentJobs.length}개
+            {failedCount > 0 && <em> · 실패 {failedCount}</em>}
+          </summary>
+          {recentJobs.map((job) => (
+            <div className={`job-center-item ${job.status}`} key={job.jobId}>
+              <div>
+                <strong>{job.title}</strong>
+                <span>{job.targetSummary}</span>
+              </div>
+              <em>
+                {jobStatusText(job.status)} · {job.message}
+              </em>
+              {job.status === "failed" && job.error && (
+                <p className="server-error-text">{job.error}</p>
+              )}
+              {job.resultAvailable && isMultiCollectionJob(job) && (
+                <button type="button" onClick={() => onOpen(job)}>
+                  결과 보기
+                </button>
+              )}
+            </div>
+          ))}
+        </details>
       )}
-      {connectionState === "connected" &&
-        activeJobs.length === 0 &&
-        visibleRecent.length === 0 &&
-        interruptedJobs.length === 0 && <p>아직 실행한 작업이 없어요.</p>}
     </section>
   );
 }
