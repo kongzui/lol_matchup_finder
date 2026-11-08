@@ -10,7 +10,6 @@ import type {
   MultiSearchBody,
   PlayerMemo,
   ResolvePlayerMemoPayload,
-  SearchBody,
 } from "./types";
 
 export class ApiError extends Error {
@@ -90,11 +89,6 @@ export const api = {
   getMeta: () => requestJson<MetaOptions>("/api/meta/options"),
   refreshMeta: () =>
     requestJson<MetaOptions>("/api/meta/refresh", { method: "POST" }),
-  createSearchJob: (body: SearchBody) =>
-    requestJson<{ jobId: string }>("/api/jobs/search", {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
   createMultiSearchJob: (body: MultiSearchBody) =>
     requestJson<{ jobId: string }>("/api/jobs/multi-search", {
       method: "POST",
@@ -169,27 +163,4 @@ export const api = {
     }
     return response.blob();
   },
-  exportSearch: async (jobId: string) => {
-    const response = await fetch(searchCsvUrl(jobId));
-    if (!response.ok) {
-      let message = "CSV 다운로드에 실패했습니다.";
-      try {
-        const body = (await response.json()) as { detail?: string };
-        message = body.detail || message;
-      } catch {
-        // JSON이 아닌 오류 응답은 쉬운 기본 메시지를 사용한다.
-      }
-      throw new ApiError(message, response.status);
-    }
-    const disposition = response.headers.get("Content-Disposition") || "";
-    const filenameMatch = disposition.match(/filename="?([^";]+)"?/i);
-    return {
-      blob: await response.blob(),
-      filename: filenameMatch?.[1] || "search_matchup_results.csv",
-    };
-  },
 };
-
-export function searchCsvUrl(jobId: string): string {
-  return `/api/exports/search/${encodeURIComponent(jobId)}.csv`;
-}

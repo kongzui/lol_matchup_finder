@@ -649,6 +649,106 @@ input[type="checkbox"] {
   padding: 18px 20px;
 }
 
+.filter-panel.stacked {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.filter-panel.stacked .filter-conditions {
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.target-section,
+.manual-target {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.target-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.target-head > span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.link-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-soft);
+  font-size: 12px;
+}
+
+.link-button:hover {
+  color: var(--accent);
+}
+
+.person-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.person-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 32px;
+  padding: 0 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-soft);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.person-chip em {
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 400;
+}
+
+.person-chip:hover {
+  background: var(--surface-raised);
+  color: var(--text);
+}
+
+.person-chip.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.person-picker-status {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.manual-target {
+  padding-top: 4px;
+}
+
+.manual-target .field textarea {
+  min-height: 60px;
+}
+
+.manual-fetch {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .filter-target,
 .filter-conditions,
 .recent-group {
@@ -673,10 +773,6 @@ input[type="checkbox"] {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
-}
-
-.filter-fields.five {
-  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
 .filter-fields.two {
@@ -2175,14 +2271,6 @@ input[type="checkbox"] {
     padding-inline: 24px;
   }
 
-  .filter-fields.five {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-
-  .filter-fields.five .filter-dates {
-    grid-column: 1 / -1;
-  }
-
   .summary {
     grid-template-columns: 1fr;
   }
@@ -2303,8 +2391,7 @@ input[type="checkbox"] {
     grid-template-columns: 1fr;
   }
 
-  .filter-fields,
-  .filter-fields.five {
+  .filter-fields {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 

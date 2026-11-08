@@ -4,7 +4,6 @@ import {
   ChevronRight,
   ChevronUp,
   Copy,
-  Database,
   Download,
   ExternalLink,
   History,
@@ -40,12 +39,10 @@ import type {
   PlayerMemo,
   RuneEntry,
   RunePage,
-  SearchBody,
-  SearchPayload,
   TeamSummary,
 } from "./types";
 
-type Workspace = "search" | "multi" | "db" | "memo" | "history";
+type Workspace = "multi" | "db" | "memo" | "history";
 type DetailTab = "summary" | "build";
 
 type PlayerMemoState = {
@@ -249,10 +246,6 @@ function splitRiotIdInput(value: string): string[] {
     .split(/\r?\n|,/)
     .map((item) => item.trim())
     .filter(Boolean);
-}
-
-function normalizeSingleRiotIdInput(value: string): string {
-  return splitRiotIdInput(value)[0] || "";
 }
 
 function appendRiotIdInput(current: string, riotId: string): string {
@@ -862,16 +855,10 @@ export default function App() {
   const selectedRecoveryJob = jobCenter.jobs.find(
     (job) => job.jobId === recoveryRequest.jobId,
   );
-  const searchRecoveryJob =
-    selectedRecoveryJob?.kind === "search"
-      ? selectedRecoveryJob
-      : jobCenter.activeJobs.find((job) => job.kind === "search");
   const multiRecoveryJob =
     selectedRecoveryJob && isMultiCollectionJob(selectedRecoveryJob)
       ? selectedRecoveryJob
       : jobCenter.activeJobs.find(isMultiCollectionJob);
-  const searchRecoveryRequestSequence =
-    selectedRecoveryJob?.kind === "search" ? recoveryRequest.sequence : 0;
   const multiRecoveryRequestSequence =
     selectedRecoveryJob && isMultiCollectionJob(selectedRecoveryJob)
       ? recoveryRequest.sequence
@@ -970,28 +957,21 @@ export default function App() {
         </div>
         <nav className="nav-list" aria-label="작업공간">
           <div className="nav-section">
-            <span className="nav-section-title">검색 도구</span>
             <NavButton
               active={active === "db"}
-              icon={<Database size={16} />}
-              label="저장된 매치업"
+              icon={<Search size={16} />}
+              label="매치업 찾기"
               onClick={() => setActive("db")}
             />
-            <NavButton
-              active={active === "search"}
-              icon={<Search size={16} />}
-              label="개별 유저 검색"
-              onClick={() => setActive("search")}
-            />
+          </div>
+          <div className="nav-section">
+            <span className="nav-section-title">데이터 관리</span>
             <NavButton
               active={active === "multi"}
               icon={<UploadCloud size={16} />}
               label="새 데이터 가져오기"
               onClick={() => setActive("multi")}
             />
-          </div>
-          <div className="nav-section">
-            <span className="nav-section-title">기록 관리</span>
             <NavButton
               active={active === "memo"}
               icon={<StickyNote size={16} />}
@@ -1160,11 +1140,7 @@ export default function App() {
                 jobId: job.jobId,
                 sequence: current.sequence + 1,
               }));
-              if (job.kind === "search") {
-                setActive("search");
-              } else if (isMultiCollectionJob(job)) {
-                setActive("multi");
-              }
+              setActive("multi");
             }}
           />
           {metaRefreshError && (
@@ -1179,25 +1155,6 @@ export default function App() {
       </aside>
 
       <main className="workspace">
-        <div hidden={active !== "search"}>
-          <SearchWorkspace
-            meta={meta}
-            playerMemos={playerMemos}
-            onCollectionCompleted={refreshMetaAndMemos}
-            recoveryJob={searchRecoveryJob || null}
-            recoveryRequestSequence={searchRecoveryRequestSequence}
-            jobs={jobCenter.jobs}
-            interruptedJobs={jobCenter.interruptedJobs}
-            jobCenterReady={jobCenter.connectionState === "connected"}
-            onJobCreated={jobCenter.refresh}
-            riotIdHistory={riotIdHistory}
-            setRiotIdHistory={setRiotIdHistory}
-            enemyChampionHistory={enemyChampionHistory}
-            setEnemyChampionHistory={setEnemyChampionHistory}
-            myChampionHistory={myChampionHistory}
-            setMyChampionHistory={setMyChampionHistory}
-          />
-        </div>
         <div hidden={active !== "multi"}>
           <MultiCollectWorkspace
             meta={meta}
@@ -1217,6 +1174,11 @@ export default function App() {
           <DbLookupWorkspace
             meta={meta}
             playerMemos={playerMemos}
+            onCollectionCompleted={refreshMetaAndMemos}
+            jobs={jobCenter.jobs}
+            interruptedJobs={jobCenter.interruptedJobs}
+            jobCenterReady={jobCenter.connectionState === "connected"}
+            onJobCreated={jobCenter.refresh}
             riotIdHistory={riotIdHistory}
             setRiotIdHistory={setRiotIdHistory}
             enemyChampionHistory={enemyChampionHistory}
@@ -1366,7 +1328,7 @@ function JobCenterPanel({
           <div className="job-center-bar" aria-hidden="true">
             <div style={{ width: `${Math.round(job.progress * 100)}%` }} />
           </div>
-          {(job.kind === "search" || isMultiCollectionJob(job)) && (
+          {isMultiCollectionJob(job) && (
             <button type="button" onClick={() => onOpen(job)}>
               이어보기
             </button>
@@ -1385,12 +1347,11 @@ function JobCenterPanel({
           {job.status === "failed" && job.error && (
             <p className="server-error-text">{job.error}</p>
           )}
-          {job.resultAvailable &&
-            (job.kind === "search" || isMultiCollectionJob(job)) && (
-              <button type="button" onClick={() => onOpen(job)}>
-                결과 보기
-              </button>
-            )}
+          {job.resultAvailable && isMultiCollectionJob(job) && (
+            <button type="button" onClick={() => onOpen(job)}>
+              결과 보기
+            </button>
+          )}
         </div>
       ))}
       {recentJobs.length > 3 && (
@@ -1409,433 +1370,6 @@ function JobCenterPanel({
         activeJobs.length === 0 &&
         visibleRecent.length === 0 &&
         interruptedJobs.length === 0 && <p>아직 실행한 작업이 없어요.</p>}
-    </section>
-  );
-}
-
-function SearchWorkspace({
-  meta,
-  playerMemos,
-  onCollectionCompleted,
-  recoveryJob,
-  recoveryRequestSequence,
-  jobs,
-  interruptedJobs,
-  jobCenterReady,
-  onJobCreated,
-  riotIdHistory,
-  setRiotIdHistory,
-  enemyChampionHistory,
-  setEnemyChampionHistory,
-  myChampionHistory,
-  setMyChampionHistory,
-}: {
-  meta: MetaOptions;
-  playerMemos: PlayerMemoState;
-  onCollectionCompleted: () => Promise<void>;
-  recoveryJob: JobStatus | null;
-  recoveryRequestSequence: number;
-  jobs: JobStatus[];
-  interruptedJobs: InterruptedJob[];
-  jobCenterReady: boolean;
-  onJobCreated: () => Promise<void>;
-  riotIdHistory: string[];
-  setRiotIdHistory: Dispatch<SetStateAction<string[]>>;
-  enemyChampionHistory: string[];
-  setEnemyChampionHistory: Dispatch<SetStateAction<string[]>>;
-  myChampionHistory: string[];
-  setMyChampionHistory: Dispatch<SetStateAction<string[]>>;
-}) {
-  const riotIdInputRef = useRef<HTMLInputElement | null>(null);
-  const [body, setBody] = useState<SearchBody>({
-    riotIdRaw: "",
-    periodKind: meta.defaultPeriod,
-    customStart: daysAgoText(90),
-    customEnd: todayText(),
-    myChampionKorean: meta.champions.find(
-      (champ) => champ.koreanName === "아리",
-    )
-      ? "아리"
-      : meta.champions[0].koreanName,
-    enemyChampionKorean: meta.allLabel,
-    laneLabel: "미드",
-    maxMatches: 100,
-  });
-  const [jobId, setJobId] = useState<string | null>(null);
-  const [resultJobId, setResultJobId] = useState<string | null>(null);
-  const [payload, setPayload] = useState<SearchPayload | null>(null);
-  const [exporting, setExporting] = useState(false);
-  const [exportError, setExportError] = useState<string | null>(null);
-  const exportRequestSequence = useRef(0);
-  const [jobActive, setJobActive] = useState(false);
-  const jobActiveRef = useRef(false);
-  const pendingRecoveryJobIdRef = useRef<string | null>(null);
-  const observedJobIdsRef = useRef<Set<string>>(new Set());
-
-  const activateJob = (nextJobId: string) => {
-    jobActiveRef.current = true;
-    setJobActive(true);
-    exportRequestSequence.current += 1;
-    setExporting(false);
-    setResultJobId(null);
-    setExportError(null);
-    setPayload(null);
-    setJobId(nextJobId);
-  };
-
-  const finishJob = () => {
-    const pendingJobId = pendingRecoveryJobIdRef.current;
-    pendingRecoveryJobIdRef.current = null;
-    if (pendingJobId) {
-      activateJob(pendingJobId);
-      return;
-    }
-    jobActiveRef.current = false;
-    setJobActive(false);
-    setJobId(null);
-  };
-
-  const trackedJob = jobs.find((job) => job.jobId === jobId) || null;
-  const completion = useJobCompletion(
-    trackedJob,
-    async (status, isCurrent) => {
-      const result = await api.getJobResult(status.jobId);
-      if (!isCurrent()) {
-        return;
-      }
-      setResultJobId(status.jobId);
-      setPayload(result.payload as SearchPayload);
-      await onCollectionCompleted();
-      if (isCurrent()) {
-        finishJob();
-      }
-    },
-    async (_status, isCurrent) => {
-      try {
-        await onCollectionCompleted();
-      } finally {
-        if (isCurrent()) {
-          finishJob();
-        }
-      }
-    },
-  );
-
-  useEffect(() => {
-    const nextJobId = recoveryJob?.jobId;
-    if (!nextJobId) {
-      return;
-    }
-    if (nextJobId === jobId) {
-      pendingRecoveryJobIdRef.current = null;
-      return;
-    }
-    if (jobActiveRef.current || !jobCenterReady) {
-      pendingRecoveryJobIdRef.current = nextJobId;
-      return;
-    }
-    pendingRecoveryJobIdRef.current = null;
-    completion.setError(null);
-    activateJob(nextJobId);
-  }, [recoveryJob?.jobId, recoveryRequestSequence]);
-
-  useEffect(() => {
-    const pendingJobId = pendingRecoveryJobIdRef.current;
-    if (!jobCenterReady || jobActiveRef.current || !pendingJobId) {
-      return;
-    }
-    pendingRecoveryJobIdRef.current = null;
-    completion.setError(null);
-    activateJob(pendingJobId);
-  }, [jobCenterReady]);
-
-  useEffect(() => {
-    if (jobId && trackedJob) {
-      observedJobIdsRef.current.add(jobId);
-    }
-  }, [jobId, trackedJob]);
-
-  useEffect(() => {
-    if (!jobId) {
-      return;
-    }
-    const interrupted = interruptedJobs.some((job) => job.jobId === jobId);
-    const disappeared =
-      observedJobIdsRef.current.has(jobId) && trackedJob === null;
-    if (!interrupted && !disappeared) {
-      return;
-    }
-    completion.setError(
-      "서버가 다시 시작되어 이 작업의 마지막 상태는 확인할 수 없어요. 이미 저장을 마친 경기는 내 컴퓨터에 남아 있어요.",
-    );
-    finishJob();
-    void onCollectionCompleted();
-  }, [interruptedJobs, jobId, trackedJob]);
-
-  const rememberHistory = (riotIdRaw: string) => {
-    const normalized = normalizeSingleRiotIdInput(riotIdRaw);
-    if (!normalized) {
-      return riotIdRaw;
-    }
-    setRiotIdHistory((prev) => {
-      const next = compactRiotIdHistory([normalized, ...prev]);
-      saveRiotIdHistory(next);
-      return next;
-    });
-    return normalized;
-  };
-
-  const rememberEnemyChampionHistory = (enemyChampion: string) => {
-    setEnemyChampionHistory((prev) => {
-      const next = compactEnemyChampionHistory([enemyChampion, ...prev], meta);
-      saveEnemyChampionHistory(next);
-      return next;
-    });
-  };
-
-  const rememberMyChampionHistory = (myChampion: string) => {
-    setMyChampionHistory((prev) => {
-      const next = compactMyChampionHistory([myChampion, ...prev], meta);
-      saveMyChampionHistory(next);
-      return next;
-    });
-  };
-
-  const applyHistoryItem = (riotId: string) => {
-    setBody({ ...body, riotIdRaw: riotId });
-    window.requestAnimationFrame(() => {
-      riotIdInputRef.current?.focus();
-      riotIdInputRef.current?.setSelectionRange(riotId.length, riotId.length);
-    });
-  };
-
-  const applyMemoItem = (item: PlayerMemo) => {
-    const nextValue = playerMemoName(item);
-    setBody({ ...body, riotIdRaw: nextValue });
-    window.requestAnimationFrame(() => {
-      riotIdInputRef.current?.focus();
-      riotIdInputRef.current?.setSelectionRange(
-        nextValue.length,
-        nextValue.length,
-      );
-    });
-  };
-
-  const submit = async (event: FormEvent) => {
-    event.preventDefault();
-    if (jobActiveRef.current || !jobCenterReady) {
-      return;
-    }
-    jobActiveRef.current = true;
-    setJobActive(true);
-    exportRequestSequence.current += 1;
-    setExporting(false);
-    setResultJobId(null);
-    setExportError(null);
-    setPayload(null);
-    completion.setError(null);
-    const nextBody = { ...body, riotIdRaw: rememberHistory(body.riotIdRaw) };
-    rememberMyChampionHistory(nextBody.myChampionKorean);
-    rememberEnemyChampionHistory(nextBody.enemyChampionKorean);
-    setBody(nextBody);
-    try {
-      const created = await api.createSearchJob(nextBody);
-      setJobId(created.jobId);
-      await onJobCreated();
-    } catch (exc) {
-      finishJob();
-      completion.setError(
-        exc instanceof Error ? exc.message : "검색 작업 시작에 실패했습니다.",
-      );
-    }
-  };
-
-  const exportCsv = async () => {
-    if (!resultJobId || exporting) {
-      return;
-    }
-    const exportRequestId = exportRequestSequence.current + 1;
-    exportRequestSequence.current = exportRequestId;
-    setExporting(true);
-    setExportError(null);
-    try {
-      const result = await api.exportSearch(resultJobId);
-      if (exportRequestSequence.current !== exportRequestId) {
-        return;
-      }
-      downloadBlob(result.blob, result.filename);
-    } catch (exc) {
-      if (exportRequestSequence.current === exportRequestId) {
-        setExportError(
-          exc instanceof Error ? exc.message : "CSV 다운로드에 실패했습니다.",
-        );
-      }
-    } finally {
-      if (exportRequestSequence.current === exportRequestId) {
-        setExporting(false);
-      }
-    }
-  };
-
-  return (
-    <section className="screen">
-      <WorkspaceHeader
-        title="개별 유저 매치업 검색"
-        description="한 유저의 최근 솔로 랭크를 불러와 챔피언, 상대, 라인 조건에 맞는 경기만 찾아요."
-      />
-      <form className="filter-panel" onSubmit={submit}>
-        <div className="filter-target">
-          <label className="field">
-            <span>조회 유저</span>
-            <input
-              ref={riotIdInputRef}
-              value={body.riotIdRaw}
-              onChange={(event) =>
-                setBody({ ...body, riotIdRaw: event.target.value })
-              }
-              placeholder="Hide on bush#KR1"
-            />
-          </label>
-          <MemoPlayerSelect state={playerMemos} onPick={applyMemoItem} />
-        </div>
-        <div className="filter-conditions">
-          <div className="filter-fields five">
-            <ChampionSelect
-              label="기준 챔피언"
-              value={body.myChampionKorean}
-              meta={meta}
-              onChange={(value) =>
-                setBody({ ...body, myChampionKorean: value })
-              }
-            />
-            <SelectField
-              label="상대 챔피언"
-              value={body.enemyChampionKorean}
-              options={[
-                meta.allLabel,
-                ...meta.champions.map((champ) => champ.koreanName),
-              ]}
-              onChange={(value) =>
-                setBody({ ...body, enemyChampionKorean: value })
-              }
-            />
-            <SelectField
-              label="라인"
-              value={body.laneLabel}
-              options={meta.laneOptions}
-              onChange={(value) => setBody({ ...body, laneLabel: value })}
-            />
-            <SelectField
-              label="기간"
-              value={body.periodKind}
-              options={meta.periodOptions}
-              onChange={(value) => setBody({ ...body, periodKind: value })}
-            />
-            <SelectField
-              label="최대 매치"
-              value={String(body.maxMatches)}
-              options={["50", "100", "200", "300"]}
-              onChange={(value) =>
-                setBody({ ...body, maxMatches: Number(value) })
-              }
-            />
-            {body.periodKind === meta.customPeriodLabel && (
-              <div className="filter-dates">
-                <DateField
-                  label="시작일"
-                  value={body.customStart || ""}
-                  onChange={(value) => setBody({ ...body, customStart: value })}
-                />
-                <DateField
-                  label="종료일"
-                  value={body.customEnd || ""}
-                  onChange={(value) => setBody({ ...body, customEnd: value })}
-                />
-              </div>
-            )}
-          </div>
-          <div className="recent-group">
-            <RecentMyChampionSearches
-              history={myChampionHistory}
-              onPick={(value) => setBody({ ...body, myChampionKorean: value })}
-            />
-            <RecentEnemyChampionSearches
-              history={enemyChampionHistory}
-              onPick={(value) =>
-                setBody({ ...body, enemyChampionKorean: value })
-              }
-            />
-            <RecentRiotIdSearches
-              history={riotIdHistory}
-              onPick={applyHistoryItem}
-            />
-          </div>
-        </div>
-        <div className="filter-foot">
-          <button
-            className="primary-action"
-            type="submit"
-            disabled={jobActive || !jobCenterReady}
-          >
-            <Search size={16} />
-            {!jobCenterReady
-              ? "기존 작업 확인 중"
-              : jobActive
-                ? "검색 중"
-                : "검색 실행"}
-          </button>
-        </div>
-      </form>
-
-      <JobProgress job={trackedJob} error={completion.error} />
-      {payload && (
-        <>
-          <SearchSummary payload={payload} />
-          <MissingMemoPanel
-            candidates={[
-              {
-                puuid: payload.account.puuid,
-                riot_id: `${payload.account.game_name}#${payload.account.tag_line}`,
-              },
-            ]}
-            memos={payload.memos}
-            onSaved={async (puuid, memo) => {
-              setPayload((current) =>
-                current
-                  ? {
-                      ...current,
-                      memos: { ...current.memos, [puuid]: memo },
-                    }
-                  : current,
-              );
-              await playerMemos.refresh();
-            }}
-          />
-          <div className="toolbar">
-            <EnemyRiotIdsCopyButton
-              rows={payload.results}
-              labelPrefix="검색 결과"
-            />
-            <button
-              className="tool-button"
-              type="button"
-              onClick={() => void exportCsv()}
-              disabled={exporting}
-            >
-              <Download size={16} />
-              {exporting ? "CSV 만드는 중" : "CSV 다운로드"}
-            </button>
-          </div>
-          {exportError && <div className="error-box">{exportError}</div>}
-          <MatchResultList
-            rows={payload.results}
-            meta={meta}
-            focusPuuid={payload.account.puuid}
-            showPlayerCopy={false}
-            memos={payload.memos}
-          />
-        </>
-      )}
     </section>
   );
 }
@@ -2138,6 +1672,11 @@ function MultiCollectWorkspace({
 function DbLookupWorkspace({
   meta,
   playerMemos,
+  onCollectionCompleted,
+  jobs,
+  interruptedJobs,
+  jobCenterReady,
+  onJobCreated,
   riotIdHistory,
   setRiotIdHistory,
   enemyChampionHistory,
@@ -2147,6 +1686,11 @@ function DbLookupWorkspace({
 }: {
   meta: MetaOptions;
   playerMemos: PlayerMemoState;
+  onCollectionCompleted: () => Promise<void>;
+  jobs: JobStatus[];
+  interruptedJobs: InterruptedJob[];
+  jobCenterReady: boolean;
+  onJobCreated: () => Promise<void>;
   riotIdHistory: string[];
   setRiotIdHistory: Dispatch<SetStateAction<string[]>>;
   enemyChampionHistory: string[];
@@ -2171,6 +1715,8 @@ function DbLookupWorkspace({
     page: 1,
     pageSize: PAGE_SIZE,
   });
+  const [selectedMemos, setSelectedMemos] = useState<string[]>([]);
+  const [manualOpen, setManualOpen] = useState(false);
   const [payload, setPayload] = useState<DbSearchPayload | null>(null);
   const [appliedBody, setAppliedBody] = useState<DbSearchBody | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -2178,12 +1724,28 @@ function DbLookupWorkspace({
   const [exporting, setExporting] = useState(false);
   const [copyingAll, setCopyingAll] = useState(false);
   const [copyAllMessage, setCopyAllMessage] = useState<string | null>(null);
+  const [fetchJobId, setFetchJobId] = useState<string | null>(null);
+  const [fetchStarting, setFetchStarting] = useState(false);
+  const [fetchResult, setFetchResult] = useState<MultiSearchPayload | null>(
+    null,
+  );
   const requestSequence = useRef(0);
   const copyRequestSequence = useRef(0);
+  const observedFetchJobRef = useRef(false);
   const memoGroups = useMemo(
     () => groupPlayerMemos(playerMemos.items),
     [playerMemos.items],
   );
+  const typedRiotIds = splitRiotIdInput(body.riotIdsRaw);
+  const searchBody: DbSearchBody = {
+    ...body,
+    targetPuuids: memoGroups
+      .filter((group) => selectedMemos.includes(group.memoText))
+      .flatMap((group) => group.items.map((item) => item.puuid)),
+  };
+  const showManualTarget = manualOpen || typedRiotIds.length > 0;
+  const fetchJob = jobs.find((job) => job.jobId === fetchJobId) || null;
+  const fetchBusy = fetchStarting || fetchJobId !== null;
 
   const runSearch = async (nextBody: DbSearchBody) => {
     const requestId = requestSequence.current + 1;
@@ -2214,6 +1776,70 @@ function DbLookupWorkspace({
       }
     }
   };
+
+  const fetchCompletion = useJobCompletion(
+    fetchJob,
+    async (status, isCurrent) => {
+      const result = await api.getJobResult(status.jobId);
+      if (!isCurrent()) {
+        return;
+      }
+      const fetched = result.payload as MultiSearchPayload;
+      setFetchResult(fetched);
+      await onCollectionCompleted();
+      if (!isCurrent()) {
+        return;
+      }
+      setFetchJobId(null);
+      // 찾지 못한 Riot ID는 실패 목록에 남기고 재조회 대상에서는 뺀다.
+      const resolved = new Set(
+        fetched.resolved_users.map((user) => user.riot_id.toLocaleLowerCase()),
+      );
+      const failed = new Set(
+        fetched.failures
+          .map((failure) => failure.riot_id_raw.toLocaleLowerCase())
+          .filter((riotId) => !resolved.has(riotId)),
+      );
+      const riotIdsRaw = typedRiotIds
+        .filter((riotId) => !failed.has(riotId.toLocaleLowerCase()))
+        .join("\n");
+      setBody({ ...body, riotIdsRaw });
+      if (riotIdsRaw || searchBody.targetPuuids?.length) {
+        void runSearch({
+          ...searchBody,
+          riotIdsRaw,
+          page: 1,
+          snapshot: undefined,
+        });
+      }
+    },
+    async (_status, isCurrent) => {
+      try {
+        await onCollectionCompleted();
+      } finally {
+        if (isCurrent()) {
+          setFetchJobId(null);
+        }
+      }
+    },
+  );
+
+  useEffect(() => {
+    observedFetchJobRef.current =
+      fetchJobId !== null && (observedFetchJobRef.current || fetchJob !== null);
+    if (!fetchJobId) {
+      return;
+    }
+    const interrupted = interruptedJobs.some((job) => job.jobId === fetchJobId);
+    if (!interrupted && !(observedFetchJobRef.current && fetchJob === null)) {
+      return;
+    }
+    fetchCompletion.setError(
+      "서버가 다시 시작되어 이 작업의 마지막 상태는 확인할 수 없어요. 이미 저장을 마친 경기는 내 컴퓨터에 남아 있어요.",
+    );
+    setFetchJobId(null);
+    void onCollectionCompleted();
+  }, [interruptedJobs, fetchJobId, fetchJob]);
 
   const rememberEnemyChampionHistory = (nextBody: DbSearchBody) => {
     setEnemyChampionHistory((prev) => {
@@ -2262,23 +1888,54 @@ function DbLookupWorkspace({
     });
   };
 
-  const applyMemoGroup = (
-    items: PlayerMemo[],
-    separator: "line" | "comma" = "line",
-  ) => {
-    const nextValue = appendRiotIdInputs(
-      body.riotIdsRaw,
-      items.map(playerMemoName),
-      separator,
+  const toggleMemo = (memoText: string) => {
+    setSelectedMemos((current) =>
+      current.includes(memoText)
+        ? current.filter((item) => item !== memoText)
+        : [...current, memoText],
     );
-    setBody({ ...body, riotIdsRaw: nextValue });
-    window.requestAnimationFrame(() => {
-      textareaRef.current?.focus();
-      textareaRef.current?.setSelectionRange(
-        nextValue.length,
-        nextValue.length,
+  };
+
+  const selectAllMemos = () => {
+    setSelectedMemos([]);
+    setBody({ ...body, riotIdsRaw: "" });
+  };
+
+  const toggleManualTarget = () => {
+    if (typedRiotIds.length > 0) {
+      setBody({ ...body, riotIdsRaw: "" });
+      setManualOpen(false);
+      return;
+    }
+    setManualOpen((current) => !current);
+  };
+
+  const startFetch = async () => {
+    if (fetchBusy || !jobCenterReady || typedRiotIds.length === 0) {
+      return;
+    }
+    setFetchStarting(true);
+    setFetchResult(null);
+    fetchCompletion.setError(null);
+    const riotIdsRaw = rememberRiotIdHistory(body.riotIdsRaw);
+    setBody({ ...body, riotIdsRaw });
+    try {
+      const created = await api.createMultiSearchJob({
+        riotIdsRaw,
+        days: meta.defaultMultiDays,
+        matchesPerPlayer: meta.defaultMultiMatchesPerPlayer,
+      });
+      setFetchJobId(created.jobId);
+      await onJobCreated();
+    } catch (exc) {
+      fetchCompletion.setError(
+        exc instanceof Error
+          ? exc.message
+          : "경기 가져오기를 시작하지 못했어요.",
       );
-    });
+    } finally {
+      setFetchStarting(false);
+    }
   };
 
   const submit = (event: FormEvent) => {
@@ -2287,13 +1944,13 @@ function DbLookupWorkspace({
       return;
     }
     const nextBody = {
-      ...body,
+      ...searchBody,
       riotIdsRaw: rememberRiotIdHistory(body.riotIdsRaw),
       page: 1,
     };
     rememberMyChampionHistory(nextBody);
     rememberEnemyChampionHistory(nextBody);
-    setBody(nextBody);
+    setBody({ ...body, riotIdsRaw: nextBody.riotIdsRaw, page: 1 });
     void runSearch(nextBody);
   };
 
@@ -2362,34 +2019,82 @@ function DbLookupWorkspace({
     : 1;
   const hasUnappliedChanges =
     appliedBody !== null &&
-    dbSearchCriteriaKey(body) !== dbSearchCriteriaKey(appliedBody);
+    dbSearchCriteriaKey(searchBody) !== dbSearchCriteriaKey(appliedBody);
   const hasNewStoredData =
     payload !== null && meta.dbIndexMaxId > payload.snapshot.maxIndexId;
 
   return (
     <section className="screen">
       <WorkspaceHeader
-        title="저장된 매치업 조회"
-        description="이미 수집된 경기에서 메모 유저 또는 입력한 유저의 매치업 통계와 목록을 빠르게 확인해요."
+        title="매치업 찾기"
+        description="내 컴퓨터에 저장된 경기에서 관심 유저나 직접 입력한 유저의 매치업을 바로 찾아요."
       />
-      <form className="filter-panel" onSubmit={submit}>
-        <div className="filter-target">
-          <label className="field">
-            <span>조회 유저 목록</span>
-            <textarea
-              ref={textareaRef}
-              value={body.riotIdsRaw}
-              onChange={(event) =>
-                setBody({ ...body, riotIdsRaw: event.target.value })
-              }
-              placeholder={"비우면 관심 유저만\nHide on bush#KR1, Keria#KR1"}
-            />
-          </label>
-          <MemoGroupSelect
+      <form className="filter-panel stacked" onSubmit={submit}>
+        <div className="target-section">
+          <div className="target-head">
+            <span>대상 유저</span>
+            <button
+              className="link-button"
+              type="button"
+              aria-expanded={showManualTarget}
+              onClick={toggleManualTarget}
+            >
+              {typedRiotIds.length > 0
+                ? "직접 입력 지우기"
+                : showManualTarget
+                  ? "직접 입력 닫기"
+                  : "다른 유저 직접 입력"}
+            </button>
+          </div>
+          <MemoPersonPicker
             groups={memoGroups}
             state={playerMemos}
-            onPick={applyMemoGroup}
+            selected={selectedMemos}
+            allActive={selectedMemos.length === 0 && typedRiotIds.length === 0}
+            onToggle={toggleMemo}
+            onSelectAll={selectAllMemos}
           />
+          {showManualTarget && (
+            <div className="manual-target">
+              <label className="field">
+                <span>Riot ID</span>
+                <textarea
+                  ref={textareaRef}
+                  value={body.riotIdsRaw}
+                  onChange={(event) =>
+                    setBody({ ...body, riotIdsRaw: event.target.value })
+                  }
+                  placeholder={"Hide on bush#KR1, Keria#KR1"}
+                />
+              </label>
+              <div className="recent-group">
+                <RecentRiotIdSearches
+                  history={riotIdHistory}
+                  onPick={applyHistoryItem}
+                />
+              </div>
+              {typedRiotIds.length > 0 && (
+                <div className="manual-fetch">
+                  <button
+                    className="tool-button"
+                    type="button"
+                    disabled={
+                      fetchBusy || !jobCenterReady || !meta.apiKeyDetected
+                    }
+                    onClick={() => void startFetch()}
+                  >
+                    <UploadCloud size={15} />
+                    {fetchBusy ? "가져오는 중" : "Riot에서 최신 경기 가져오기"}
+                  </button>
+                  <span>
+                    {meta.apiKeyDetected
+                      ? `최근 ${meta.defaultMultiDays}일 · 1인당 최대 ${meta.defaultMultiMatchesPerPlayer}판을 저장하고 바로 다시 조회해요.`
+                      : "Riot API 키가 있어야 가져올 수 있어요."}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
         </div>
         <div className="filter-conditions">
           <div className="filter-fields">
@@ -2450,10 +2155,6 @@ function DbLookupWorkspace({
                 setBody({ ...body, enemyChampionKorean: value })
               }
             />
-            <RecentRiotIdSearches
-              history={riotIdHistory}
-              onPick={applyHistoryItem}
-            />
           </div>
         </div>
         <div className="filter-foot">
@@ -2468,19 +2169,38 @@ function DbLookupWorkspace({
             <span>이번 패치만</span>
           </label>
           <button className="primary-action" type="submit" disabled={searching}>
-            <Database size={16} />
-            {searching ? "조회 중" : "저장된 경기 조회"}
+            <Search size={16} />
+            {searching ? "조회 중" : "매치업 조회"}
           </button>
         </div>
       </form>
 
+      <JobProgress job={fetchJob} error={fetchCompletion.error} />
+      {fetchResult && (
+        <>
+          <CollectionFailures failures={fetchResult.failures} />
+          <MissingMemoPanel
+            candidates={fetchResult.resolved_users}
+            memos={fetchResult.memos}
+            onSaved={async (puuid, memo) => {
+              setFetchResult((current) =>
+                current
+                  ? {
+                      ...current,
+                      memos: { ...current.memos, [puuid]: memo },
+                    }
+                  : current,
+              );
+              await playerMemos.refresh();
+            }}
+          />
+        </>
+      )}
       {error && <div className="error-box">{error}</div>}
       {!payload && !searching && meta.dbIndexedMatchCount === 0 && (
         <div className="empty">
           <strong>아직 조회할 수 있는 저장 경기가 없어요.</strong>
-          <p>
-            개별 유저 검색이나 새 데이터 가져오기에서 경기를 먼저 모아 주세요.
-          </p>
+          <p>새 데이터 가져오기에서 경기를 먼저 모아 주세요.</p>
         </div>
       )}
       {hasUnappliedChanges && (
@@ -2559,8 +2279,6 @@ function DbLookupWorkspace({
           <MatchResultList
             rows={payload.results}
             meta={meta}
-            showPlayerCopy
-            clientPagination={false}
             memos={payload.memos}
             emptyTitle={
               payload.snapshot.targetPuuids.length === 0
@@ -2662,7 +2380,7 @@ function PlayerMemoWorkspace({
     if (
       !window.confirm(
         `${name}을 관심 유저에서 삭제할까요?\n\n` +
-          "저장된 경기 데이터는 남지만, 저장된 매치업의 기본 조회 대상과 " +
+          "저장된 경기 데이터는 남지만, 매치업 찾기의 기본 조회 대상과 " +
           "앱 시작 자동 수집 대상에서는 빠져요.",
       )
     ) {
@@ -2696,7 +2414,7 @@ function PlayerMemoWorkspace({
     <section className="screen">
       <WorkspaceHeader
         title="관심 유저 관리"
-        description="저장된 매치업의 기본 대상과 앱 시작 수집 대상을 관리해요. 메모는 비워도 괜찮아요."
+        description="매치업 찾기의 기본 대상과 앱 시작 수집 대상을 관리해요. 메모는 비워도 괜찮아요."
       />
       <form className="memo-form" onSubmit={submit}>
         <label className="field">
@@ -2968,46 +2686,59 @@ function WorkspaceHeader({
   );
 }
 
-function MemoPlayerSelect({
+function MemoPersonPicker({
+  groups,
   state,
-  onPick,
+  selected,
+  allActive,
+  onToggle,
+  onSelectAll,
 }: {
+  groups: ReturnType<typeof groupPlayerMemos>;
   state: PlayerMemoState;
-  onPick: (item: PlayerMemo) => void;
+  selected: string[];
+  allActive: boolean;
+  onToggle: (memoText: string) => void;
+  onSelectAll: () => void;
 }) {
-  const { items, loading, error } = state;
+  if (groups.length === 0) {
+    return (
+      <p className="person-picker-status">
+        {state.loading
+          ? "관심 유저를 불러오는 중이에요."
+          : state.error
+            ? "관심 유저를 불러오지 못했어요."
+            : "등록된 관심 유저가 없어요. 관심 유저 메뉴에서 추가하거나 직접 입력해 주세요."}
+      </p>
+    );
+  }
   return (
-    <label className="field">
-      <span>메모된 유저</span>
-      <select
-        value=""
-        onChange={(event) => {
-          const item = items.find(
-            (candidate) => candidate.puuid === event.target.value,
-          );
-          if (item) {
-            onPick(item);
-          }
-        }}
-        disabled={loading || items.length === 0}
-        title={error || undefined}
+    <div className="person-picker" role="group" aria-label="관심 유저 선택">
+      <button
+        className={`person-chip ${allActive ? "active" : ""}`}
+        type="button"
+        aria-pressed={allActive}
+        onClick={onSelectAll}
       >
-        <option value="">
-          {loading
-            ? "메모 불러오는 중"
-            : error
-              ? "메모 불러오기 실패"
-              : items.length
-                ? "메모에서 선택"
-                : "등록된 메모 없음"}
-        </option>
-        {items.map((item) => (
-          <option value={item.puuid} key={item.puuid}>
-            {item.memo} · {playerMemoName(item)}
-          </option>
-        ))}
-      </select>
-    </label>
+        전체<em>{groups.length}명</em>
+      </button>
+      {groups.map((group) => {
+        const active = selected.includes(group.memoText);
+        return (
+          <button
+            className={`person-chip ${active ? "active" : ""}`}
+            type="button"
+            key={group.memoText}
+            aria-pressed={active}
+            title={group.items.map(playerMemoName).join("\n")}
+            onClick={() => onToggle(group.memoText)}
+          >
+            {group.memoText}
+            {group.items.length > 1 && <em>계정 {group.items.length}</em>}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -3399,34 +3130,6 @@ function JobProgress({
   );
 }
 
-function SearchSummary({ payload }: { payload: SearchPayload }) {
-  const wins = payload.results.filter((row) => row.win).length;
-  const total = payload.results.length;
-  const losses = total - wins;
-  return (
-    <SummaryGrid
-      title={`${payload.account.game_name}#${payload.account.tag_line}`}
-      meta={`${payload.lane_label} · ${payload.period_kind}`}
-      items={[
-        ["조건에 맞는 경기", `${total}`, "경기"],
-        [
-          "승률",
-          total ? `${((wins / total) * 100).toFixed(1)}%` : "-",
-          `${wins}승 ${losses}패`,
-        ],
-        ["확인한 경기", `${payload.scanned_total}`, "경기"],
-        [
-          "저장본 사용 / 외부 요청",
-          `${payload.cache_hits} / ${payload.api_calls}`,
-          payload.index_allowed
-            ? `새로 저장한 조회 항목 ${payload.indexed_rows}개`
-            : `저장 대상 아님 · ${payload.index_tier || "랭크 없음"}`,
-        ],
-      ]}
-    />
-  );
-}
-
 function MultiSummary({ payload }: { payload: MultiSearchPayload }) {
   return (
     <>
@@ -3448,18 +3151,29 @@ function MultiSummary({ payload }: { payload: MultiSearchPayload }) {
           ["저장본 사용", `${payload.cache_hits}`, "건"],
         ]}
       />
-      {payload.failures.length > 0 && (
-        <div className="failure-list">
-          <h2>수집 실패 목록</h2>
-          {payload.failures.map((failure) => (
-            <p key={`${failure.riot_id_raw}-${failure.reason}`}>
-              <strong>{failure.riot_id_raw}</strong>
-              <span>{failure.reason}</span>
-            </p>
-          ))}
-        </div>
-      )}
+      <CollectionFailures failures={payload.failures} />
     </>
+  );
+}
+
+function CollectionFailures({
+  failures,
+}: {
+  failures: MultiSearchPayload["failures"];
+}) {
+  if (failures.length === 0) {
+    return null;
+  }
+  return (
+    <div className="failure-list">
+      <h2>수집 실패 목록</h2>
+      {failures.map((failure) => (
+        <p key={`${failure.riot_id_raw}-${failure.reason}`}>
+          <strong>{failure.riot_id_raw}</strong>
+          <span>{failure.reason}</span>
+        </p>
+      ))}
+    </div>
   );
 }
 
@@ -3522,38 +3236,17 @@ function SummaryGrid({
 function MatchResultList({
   rows,
   meta,
-  focusPuuid,
-  showPlayerCopy,
   memos = {},
-  clientPagination = true,
   emptyTitle = "조건에 맞는 경기를 찾지 못했습니다.",
   emptyDescription = "기간을 늘리거나 챔피언/라인 선택이 맞는지 확인해 주세요.",
 }: {
   rows: MatchRow[];
   meta: MetaOptions;
-  focusPuuid?: string;
-  showPlayerCopy: boolean;
   memos?: Record<string, string>;
-  clientPagination?: boolean;
   emptyTitle?: string;
   emptyDescription?: string;
 }) {
   const [openIds, setOpenIds] = useState<Set<string>>(new Set());
-  const [page, setPage] = useState(1);
-  const pageCount = clientPagination
-    ? Math.max(Math.ceil(rows.length / PAGE_SIZE), 1)
-    : 1;
-  const visibleRows = useMemo(
-    () =>
-      clientPagination
-        ? rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
-        : rows,
-    [clientPagination, page, rows],
-  );
-
-  useEffect(() => {
-    setPage(1);
-  }, [rows]);
 
   if (rows.length === 0) {
     return (
@@ -3580,48 +3273,22 @@ function MatchResultList({
     <section className="result-list">
       <div className="list-head">
         <h2>결과 목록</h2>
-        {clientPagination && (
-          <div className="pager compact">
-            <button
-              type="button"
-              aria-label="이전 페이지"
-              disabled={page <= 1}
-              onClick={() => setPage(page - 1)}
-            >
-              <ChevronLeft size={16} />
-            </button>
-            <span>
-              {page} / {pageCount}
-            </span>
-            <button
-              type="button"
-              aria-label="다음 페이지"
-              disabled={page >= pageCount}
-              onClick={() => setPage(page + 1)}
-            >
-              <ChevronRight size={16} />
-            </button>
-          </div>
-        )}
       </div>
-      {visibleRows.map((row, index) => {
-        const id = `${row.match_id || index}-${row.player_puuid || focusPuuid || index}`;
-        const playerPuuid = row.player_puuid || focusPuuid;
+      {rows.map((row, index) => {
+        const id = `${row.match_id || index}-${row.player_puuid || index}`;
         return (
           <article className="result-card" key={id}>
             <MatchResultCard
               row={row}
               meta={meta}
-              showPlayerCopy={showPlayerCopy}
-              focusPuuid={focusPuuid}
               memos={memos}
               detailOpen={openIds.has(id)}
               onToggle={() => toggle(id)}
             />
-            {openIds.has(id) && row.match_id && playerPuuid && (
+            {openIds.has(id) && row.match_id && row.player_puuid && (
               <MatchDetailPanel
                 matchId={row.match_id}
-                playerPuuid={playerPuuid}
+                playerPuuid={row.player_puuid}
               />
             )}
           </article>
@@ -3634,16 +3301,12 @@ function MatchResultList({
 function MatchResultCard({
   row,
   meta,
-  showPlayerCopy,
-  focusPuuid,
   memos,
   detailOpen,
   onToggle,
 }: {
   row: MatchRow;
   meta: MetaOptions;
-  showPlayerCopy: boolean;
-  focusPuuid?: string;
   memos: Record<string, string>;
   detailOpen: boolean;
   onToggle: () => void;
@@ -3657,8 +3320,7 @@ function MatchResultCard({
     row.player_tag_line || player.tag,
   );
   const enemyId = riotId(enemyName, enemyTag, row.enemy_riot_id);
-  const playerPuuid = row.player_puuid || focusPuuid;
-  const playerMemo = playerPuuid ? memos[playerPuuid] : undefined;
+  const playerMemo = row.player_puuid ? memos[row.player_puuid] : undefined;
   const enemyMemo = row.enemy_puuid ? memos[row.enemy_puuid] : undefined;
   const enemyLink = opggUrl(enemyName, enemyTag);
   const resultClass = row.win ? "win" : "loss";
@@ -3679,9 +3341,7 @@ function MatchResultCard({
         <em>{secondsToMinutes(row.game_duration)}</em>
       </div>
       <div className="player-summary">
-        {showPlayerCopy && (
-          <span className="player-id">{withMemo(playerId, playerMemo)}</span>
-        )}
+        <span className="player-id">{withMemo(playerId, playerMemo)}</span>
         <div className="champ-line">
           <ChampionLoadout row={row} meta={meta} />
           <div>
@@ -3727,9 +3387,7 @@ function MatchResultCard({
         </div>
       </div>
       <div className="actions">
-        {showPlayerCopy && (
-          <CopyButton value={playerId} label="플레이어 Riot ID 복사" />
-        )}
+        <CopyButton value={playerId} label="플레이어 Riot ID 복사" />
         <CopyButton value={enemyId} label="상대 Riot ID 복사" />
         <a
           className={`icon-button ${enemyLink ? "" : "disabled"}`}
@@ -3844,17 +3502,7 @@ function ChampionLoadout({ row, meta }: { row: MatchRow; meta: MetaOptions }) {
   );
 }
 
-function CopyButton({
-  value,
-  label,
-  children,
-  className = "icon-button",
-}: {
-  value: string;
-  label: string;
-  children?: ReactNode;
-  className?: string;
-}) {
+function CopyButton({ value, label }: { value: string; label: string }) {
   const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
   const timer = useRef<number | null>(null);
   useEffect(
@@ -3881,63 +3529,14 @@ function CopyButton({
     state === "copied" ? "복사됨" : state === "failed" ? "복사 실패" : null;
   return (
     <button
-      className={className}
+      className="icon-button"
       type="button"
       onClick={copy}
       title={stateLabel || label}
       aria-label={stateLabel || label}
     >
-      {stateLabel
-        ? children
-          ? stateLabel
-          : state === "copied"
-            ? "✓"
-            : "!"
-        : children || <Copy size={16} />}
+      {state === "copied" ? "✓" : state === "failed" ? "!" : <Copy size={16} />}
     </button>
-  );
-}
-
-function EnemyRiotIdsCopyButton({
-  rows,
-  labelPrefix,
-}: {
-  rows: MatchRow[];
-  labelPrefix: string;
-}) {
-  const enemyIds = useMemo(() => {
-    const seen = new Set<string>();
-    const values: string[] = [];
-    for (const row of rows) {
-      const split = splitRiotId(row.enemy_riot_id);
-      const value = riotId(
-        row.enemy_game_name || split.name,
-        row.enemy_tag_line || split.tag,
-        row.enemy_riot_id,
-      );
-      const key = value.toLocaleLowerCase();
-      if (value === "-" || seen.has(key)) {
-        continue;
-      }
-      seen.add(key);
-      values.push(value);
-    }
-    return values;
-  }, [rows]);
-
-  if (enemyIds.length === 0) {
-    return null;
-  }
-  const label = `${labelPrefix} 상대 Riot ID ${enemyIds.length}명 복사`;
-  return (
-    <CopyButton
-      value={enemyIds.join("\n")}
-      label={label}
-      className="tool-button"
-    >
-      <Copy size={16} />
-      {label}
-    </CopyButton>
   );
 }
 

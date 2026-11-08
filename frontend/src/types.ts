@@ -56,17 +56,6 @@ export interface MetaOptions {
   };
 }
 
-export interface SearchBody {
-  riotIdRaw: string;
-  periodKind: string;
-  customStart: string | null;
-  customEnd: string | null;
-  myChampionKorean: string;
-  enemyChampionKorean: string;
-  laneLabel: string;
-  maxMatches: number;
-}
-
 export interface MultiSearchBody {
   riotIdsRaw: string;
   days: number;
@@ -82,6 +71,7 @@ export interface DbSearchBody {
   customEnd: string | null;
   currentPatchOnly: boolean;
   riotIdsRaw: string;
+  targetPuuids?: string[];
   page: number;
   pageSize: number;
   snapshot?: DbSearchSnapshot;
@@ -155,26 +145,6 @@ export interface MatchRow {
   myStatShardNames?: string[];
 }
 
-export interface SearchPayload {
-  results: MatchRow[];
-  scanned_total: number;
-  cache_hits: number;
-  api_calls: number;
-  account: {
-    puuid: string;
-    game_name: string;
-    tag_line: string;
-  };
-  my_champion_key: string | null;
-  enemy_champion_key: string | null;
-  lane_label: string;
-  period_kind: string;
-  indexed_rows: number;
-  index_allowed: boolean;
-  index_tier: string | null;
-  memos: Record<string, string>;
-}
-
 export interface MultiSearchPayload {
   input_count: number;
   success_count: number;
@@ -217,7 +187,7 @@ export interface DbSearchPayload {
 
 export interface JobPayload {
   kind: string;
-  payload: SearchPayload | MultiSearchPayload;
+  payload: MultiSearchPayload;
 }
 
 export interface MemoTarget {
