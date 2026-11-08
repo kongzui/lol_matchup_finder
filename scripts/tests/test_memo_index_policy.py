@@ -53,8 +53,8 @@ class MemoIndexBackfillTests(unittest.TestCase):
 
     def _save_discovered(self, match_id: str, source_puuid: str) -> None:
         self.cache.save_match(match_id, _match(match_id, source_puuid, "enemy"))
-        self.cache.record_match_discovery(
-            match_id=match_id,
+        self.cache.record_match_discoveries(
+            match_ids=[match_id],
             source_puuid=source_puuid,
             source="manual_user",
         )

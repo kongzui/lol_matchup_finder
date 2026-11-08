@@ -46,7 +46,7 @@ class _RecordingCache:
     def save_player_identity(self, **_kwargs: object) -> None:
         pass
 
-    def record_match_discovery(self, **_kwargs: object) -> None:
+    def record_match_discoveries(self, **_kwargs: object) -> None:
         pass
 
     def get_match(self, _match_id: str) -> None:
@@ -462,17 +462,21 @@ class MultiSearchCompletionTests(unittest.TestCase):
         self.assertIn("조회용 데이터로 저장하지 못했습니다", payload.failures[0].reason)
 
     def test_existing_index_is_not_rebuilt_and_still_counts_as_complete(self) -> None:
-        """이미 조회 가능한 경기는 다시 인덱싱하지 않는다."""
+        """이미 조회 가능한 경기는 원본을 다시 읽거나 인덱싱하지 않는다."""
+        detail = Mock(return_value={"match_id": "KR_EXISTING"})
         payload, cache = self._run(
             riot_ids_raw="One#KR1",
             fetch_ids=lambda **_kwargs: ["KR_EXISTING"],
-            fetch_detail=lambda *_args: {"match_id": "KR_EXISTING"},
+            fetch_detail=detail,
             existing_index_ids={"KR_EXISTING"},
         )
 
         self.assertEqual(payload.success_count, 1)
         self.assertEqual(payload.indexed_rows, 0)
+        self.assertEqual(payload.cache_hits, 2)
+        self.assertEqual(payload.new_match_details, 0)
         self.assertEqual(cache.events, ["collected:one"])
+        detail.assert_not_called()
 
 
 if __name__ == "__main__":

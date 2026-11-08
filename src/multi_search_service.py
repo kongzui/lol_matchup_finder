@@ -319,12 +319,12 @@ def _run_multi_search_unlocked(
                 match_ids = match_ids[:matches_per_player]
             match_ids_by_puuid[account["puuid"]] = match_ids
 
+            cache.record_match_discoveries(
+                match_ids=match_ids,
+                source_puuid=account["puuid"],
+                source=MULTI_SEARCH_SOURCE,
+            )
             for match_id in match_ids:
-                cache.record_match_discovery(
-                    match_id=match_id,
-                    source_puuid=account["puuid"],
-                    source=MULTI_SEARCH_SOURCE,
-                )
                 if match_id not in seen_match_ids:
                     seen_match_ids.add(match_id)
                     match_ids_to_fetch.append(match_id)
@@ -335,6 +335,11 @@ def _run_multi_search_unlocked(
         for idx, match_id in enumerate(match_ids_to_fetch, start=1):
             progress_cb(0.60 + (idx / max(total_matches, 1)) * 0.35)
             status_cb(f"경기 내용을 저장하는 중... ({idx}/{total_matches})")
+
+            if match_id in indexed_match_ids:
+                # 조회 항목이 있는 경기는 원본도 저장돼 있어 다시 읽지 않는다.
+                cache_hits += 1
+                continue
 
             cached_match = cache.get_match(match_id)
             cached_before = cached_match is not None
@@ -359,19 +364,18 @@ def _run_multi_search_unlocked(
                 new_match_details += 1
                 time.sleep(0.05)
 
-            if match_id not in indexed_match_ids:
-                match_indexed_rows, index_available = ensure_match_indexed(
-                    cache,
-                    match,
-                    match_id=match_id,
-                    queue_id=config.queue_id,
+            match_indexed_rows, index_available = ensure_match_indexed(
+                cache,
+                match,
+                match_id=match_id,
+                queue_id=config.queue_id,
+            )
+            if not index_available:
+                failed_match_reasons[match_id] = (
+                    "매치 상세를 조회용 데이터로 저장하지 못했습니다."
                 )
-                if not index_available:
-                    failed_match_reasons[match_id] = (
-                        "매치 상세를 조회용 데이터로 저장하지 못했습니다."
-                    )
-                    continue
-                indexed_rows += match_indexed_rows
+                continue
+            indexed_rows += match_indexed_rows
 
         for account in resolved_accounts:
             match_ids = match_ids_by_puuid.get(account["puuid"])

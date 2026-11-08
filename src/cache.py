@@ -197,15 +197,8 @@ class MatchCache:
                 CREATE INDEX IF NOT EXISTS idx_matchup_index_match
                     ON matchup_index (match_id);
 
-                CREATE TABLE IF NOT EXISTS player_champion_stats (
-                    puuid TEXT NOT NULL,
-                    champion_key TEXT NOT NULL,
-                    games INTEGER NOT NULL DEFAULT 0,
-                    wins INTEGER NOT NULL DEFAULT 0,
-                    last_played_at INTEGER,
-                    updated_at INTEGER NOT NULL,
-                    PRIMARY KEY (puuid, champion_key)
-                );
+                CREATE INDEX IF NOT EXISTS idx_matchup_index_player
+                    ON matchup_index (player_puuid, lane, game_creation);
                 """
             )
             columns = {
@@ -501,6 +494,7 @@ class MatchCache:
                 LEFT JOIN (
                     SELECT player_puuid, COUNT(*) AS game_count
                     FROM matchup_index
+                    WHERE player_puuid IN (SELECT puuid FROM player_memo)
                     GROUP BY player_puuid
                 ) mi ON mi.player_puuid = pm.puuid
                 ORDER BY pm.updated_at DESC
@@ -694,23 +688,23 @@ class MatchCache:
             conn.commit()
 
     # --- match_discovery / manual_collection_user ---
-    def record_match_discovery(
+    def record_match_discoveries(
         self,
         *,
-        match_id: str,
+        match_ids: list[str],
         source_puuid: str,
         source: str,
     ) -> None:
-        """matchId를 어떤 흐름에서 발견했는지 저장한다."""
+        """한 사람의 matchId 목록을 어떤 흐름에서 발견했는지 한 번에 저장한다."""
         now = int(time.time())
         with self._connect() as conn:
-            conn.execute(
+            conn.executemany(
                 """
                 INSERT OR IGNORE INTO match_discovery (
                     match_id, source_puuid, source, discovered_at
                 ) VALUES (?, ?, ?, ?)
                 """,
-                (match_id, source_puuid, source, now),
+                [(match_id, source_puuid, source, now) for match_id in match_ids],
             )
             conn.commit()
 
@@ -1019,11 +1013,6 @@ class MatchCache:
                         now,
                     ),
                 )
-            _rebuild_player_champion_stats(
-                conn,
-                {row["player_puuid"] for row in rows},
-                now,
-            )
 
             conn.commit()
 
@@ -1485,42 +1474,6 @@ def _upsert_player_registry(
             now,
             now,
         ),
-    )
-
-
-def _rebuild_player_champion_stats(
-    conn: sqlite3.Connection,
-    puuids: set[str],
-    now: int,
-) -> None:
-    if not puuids:
-        return
-
-    placeholders = ",".join("?" for _ in puuids)
-    conn.execute(
-        f"""
-        DELETE FROM player_champion_stats
-        WHERE puuid IN ({placeholders})
-        """,
-        tuple(puuids),
-    )
-    conn.execute(
-        f"""
-        INSERT INTO player_champion_stats (
-            puuid, champion_key, games, wins, last_played_at, updated_at
-        )
-        SELECT
-            player_puuid,
-            player_champion_key,
-            COUNT(*),
-            SUM(win),
-            MAX(game_creation),
-            ?
-        FROM matchup_index
-        WHERE player_puuid IN ({placeholders})
-        GROUP BY player_puuid, player_champion_key
-        """,
-        (now, *tuple(puuids)),
     )
 
 
