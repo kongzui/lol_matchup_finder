@@ -85,6 +85,67 @@ class MemoIndexBackfillTests(unittest.TestCase):
 
         self.assertEqual(self.cache.list_unindexed_memo_match_ids(), ["KR_4"])
 
+    def test_memo_list_counts_only_each_memo_players_games(self) -> None:
+        self._save_discovered("KR_5", "memo-c")
+        self.cache.upsert_player_memo("memo-c", "C")
+        index_memo_player_matches(self.cache, 420)
+
+        items = self.cache.list_player_memos()
+
+        self.assertEqual([item["puuid"] for item in items], ["memo-c"])
+        self.assertEqual(items[0]["game_count"], 1)
+
+
+class StatShardBackfillTests(unittest.TestCase):
+    """예전 조회 항목의 능력치 파편은 시작 시 한 번 채워 재사용한다."""
+
+    def setUp(self) -> None:
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp_dir.cleanup)
+        self.cache = MatchCache(str(Path(self.temp_dir.name) / "cache.db"))
+        match = _match("KR_OLD", "player", "enemy")
+        for participant in match["info"]["participants"]:
+            participant["perks"] = {
+                "statPerks": {"offense": 5008, "flex": 5010, "defense": 5011}
+            }
+        self.cache.save_match("KR_OLD", match)
+        self.cache.index_match(match)
+        with self.cache._connect() as conn:
+            conn.execute(
+                """
+                UPDATE matchup_index
+                SET player_stat_offense = NULL,
+                    player_stat_flex = NULL,
+                    player_stat_defense = NULL
+                """
+            )
+            conn.commit()
+
+    def _player_row(self) -> dict[str, Any]:
+        return self.cache.search_matchup_index(
+            player_champion_key=None,
+            enemy_champion_key=None,
+            lane="MIDDLE",
+            start_ts=None,
+            end_ts=None,
+            patch_prefix=None,
+            player_puuids=["player"],
+        )[0]
+
+    def test_backfill_fills_shards_from_the_saved_match(self) -> None:
+        self.assertEqual(self.cache.backfill_matchup_stat_shards(), 2)
+
+        row = self._player_row()
+        self.assertEqual(
+            (row["my_stat_offense"], row["my_stat_flex"], row["my_stat_defense"]),
+            (5008, 5010, 5011),
+        )
+
+    def test_second_backfill_has_nothing_left_to_fill(self) -> None:
+        self.cache.backfill_matchup_stat_shards()
+
+        self.assertEqual(self.cache.backfill_matchup_stat_shards(), 0)
+
 
 class PersonTargetRequestTests(unittest.TestCase):
     """사람 칩으로 고른 계정은 Riot ID 해석 없이 조회 대상이 된다."""

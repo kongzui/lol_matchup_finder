@@ -1073,42 +1073,14 @@ def _payload_dict(payload: Any) -> dict[str, Any]:
     )
 
 
-def _result_stat_shard_ids(row: dict[str, Any]) -> list[int | None]:
-    shard_ids = [
+def _result_row_with_assets(row: dict[str, Any]) -> dict[str, Any]:
+    static_data = _get_static_data()
+    enriched = dict(row)
+    stat_shard_ids = [
         row.get("my_stat_offense"),
         row.get("my_stat_flex"),
         row.get("my_stat_defense"),
     ]
-    if any(shard_id is not None for shard_id in shard_ids):
-        return shard_ids
-
-    match_id = row.get("match_id")
-    player_puuid = row.get("player_puuid")
-    if not match_id or not player_puuid:
-        return shard_ids
-
-    match = _get_cache().get_match(match_id)
-    info = (match or {}).get("info") or {}
-    participant = next(
-        (
-            player
-            for player in info.get("participants") or []
-            if player.get("puuid") == player_puuid
-        ),
-        None,
-    )
-    stat_perks = ((participant or {}).get("perks") or {}).get("statPerks") or {}
-    return [
-        stat_perks.get("offense"),
-        stat_perks.get("flex"),
-        stat_perks.get("defense"),
-    ]
-
-
-def _result_row_with_assets(row: dict[str, Any]) -> dict[str, Any]:
-    static_data = _get_static_data()
-    enriched = dict(row)
-    stat_shard_ids = _result_stat_shard_ids(row)
     enriched["mySummoner1IconUrl"] = static_data.summoner_icon_url(
         row.get("my_summoner1_id")
     )
@@ -1457,6 +1429,7 @@ def start_application() -> dict[str, Any]:
     """앱 시작 준비와 자동 수집 조건 확인을 명시적으로 실행한다."""
     _ensure_data_dragon_checked()
     index_memo_player_matches(_get_cache(), _get_config().queue_id)
+    _get_cache().backfill_matchup_stat_shards()
     _maybe_start_auto_refresh()
     return _build_meta_options()
 

@@ -1018,6 +1018,54 @@ class MatchCache:
 
         return len(rows)
 
+    def backfill_matchup_stat_shards(self) -> int:
+        """능력치 파편 열이 생기기 전의 조회 항목을 저장된 경기 원본으로 채운다."""
+        updates: list[tuple[Any, Any, Any, str, str]] = []
+        with self._connect() as conn:
+            for row in conn.execute(
+                """
+                SELECT match_id, raw_json
+                FROM match_cache
+                WHERE match_id IN (
+                    SELECT match_id
+                    FROM matchup_index
+                    WHERE player_stat_offense IS NULL
+                      AND player_stat_flex IS NULL
+                      AND player_stat_defense IS NULL
+                )
+                """
+            ):
+                try:
+                    match = json.loads(row["raw_json"])
+                except json.JSONDecodeError:
+                    continue
+                for participant in (match.get("info") or {}).get("participants") or []:
+                    runes = _rune_fields(participant)
+                    shards = (
+                        runes["stat_offense"],
+                        runes["stat_flex"],
+                        runes["stat_defense"],
+                    )
+                    if participant.get("puuid") and any(
+                        shard is not None for shard in shards
+                    ):
+                        updates.append((*shards, row["match_id"], participant["puuid"]))
+
+            if updates:
+                conn.executemany(
+                    """
+                    UPDATE matchup_index
+                    SET
+                        player_stat_offense = ?,
+                        player_stat_flex = ?,
+                        player_stat_defense = ?
+                    WHERE match_id = ? AND player_puuid = ?
+                    """,
+                    updates,
+                )
+                conn.commit()
+        return len(updates)
+
     @staticmethod
     def _matchup_index_filter(
         *,
