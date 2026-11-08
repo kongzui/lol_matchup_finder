@@ -1,32 +1,7 @@
 {
   "permissions": {
-    "allow": [
-      "Read(*)",
-      "Edit(*)",
-      "Write(*)",
-      "Bash(*)",
-      "PowerShell(*)",
-      "WebFetch(*)",
-      "WebSearch"
-    ],
-    "deny": [],
-    "ask": [
-      "Bash(git commit*)",
-      "Bash(git push*)",
-      "Bash(git rm*)",
-      "Bash(git checkout*)",
-      "Bash(rm*)",
-      "Bash(del*)",
-      "Bash(format*)",
-      "Bash(rmdir*)",
-
-      "PowerShell(git commit*)",
-      "PowerShell(git push*)",
-      "PowerShell(git rm*)",
-      "PowerShell(git checkout*)",
-      "PowerShell(Remove-Item *)",
-      "PowerShell(Remove-Item*)",
-      "PowerShell(format*)"
-    ]
+    "defaultMode": "auto",
+    "allow": ["Bash(*)"],
+    "deny": ["Bash(rm -rf *)", "Bash(rm -f *)", "Bash(git push *--force*)", "Bash(git push *-f*)"]
   }
 }
