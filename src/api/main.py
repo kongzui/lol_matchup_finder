@@ -1470,8 +1470,8 @@ def get_options() -> dict[str, Any]:
 
 @app.post("/api/meta/refresh")
 def refresh_meta() -> dict[str, Any]:
-    """Data Dragon 정적 데이터를 즉시 갱신하고 메타 옵션을 반환한다."""
-    _refresh_data_dragon_resources(force_refresh=True, check_latest=True)
+    """최신 패치를 확인해 바뀐 정적 데이터만 받고 메타 옵션을 반환한다."""
+    _refresh_data_dragon_resources(force_refresh=False, check_latest=True)
     return _build_meta_options()
 
 

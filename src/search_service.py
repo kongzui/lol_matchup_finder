@@ -281,21 +281,6 @@ def fetch_ranked_profile(
             entries = client.get_league_entries_by_puuid(puuid)
         except RiotApiNotFound:
             entries = []
-        api_calls = 1
-
-        if not entries:
-            try:
-                summoner = client.get_summoner_by_puuid(puuid)
-                summoner_id = summoner.get("id")
-                entries = (
-                    client.get_league_entries_by_summoner_id(summoner_id)
-                    if summoner_id
-                    else []
-                )
-                api_calls += 2 if summoner_id else 1
-            except RiotApiNotFound:
-                entries = []
-                api_calls += 1
 
         profile_entry = next(
             (
@@ -316,7 +301,7 @@ def fetch_ranked_profile(
             wins=profile_entry.get("wins") if profile_entry else None,
             losses=profile_entry.get("losses") if profile_entry else None,
         )
-        return cache.get_ranked_profile(puuid, queue_id), 0, api_calls
+        return cache.get_ranked_profile(puuid, queue_id), 0, 1
 
 
 @contextmanager

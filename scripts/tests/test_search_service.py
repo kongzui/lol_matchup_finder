@@ -33,9 +33,28 @@ class RankedProfileCacheTests(unittest.TestCase):
         self.assertEqual(cache_hits, 1)
         self.assertEqual(api_calls, 0)
         client.get_league_entries_by_puuid.assert_not_called()
-        client.get_summoner_by_puuid.assert_not_called()
-        client.get_league_entries_by_summoner_id.assert_not_called()
         cache.save_ranked_profile.assert_not_called()
+
+    def test_unranked_player_is_settled_with_one_riot_api_call(self) -> None:
+        saved_profile = {"tier": None, "fetched_at": 123}
+        cache = Mock()
+        cache.get_ranked_profile.side_effect = [None, None, saved_profile]
+        client = Mock()
+        client.get_league_entries_by_puuid.return_value = []
+
+        profile, cache_hits, api_calls = fetch_ranked_profile(
+            client=client,
+            cache=cache,
+            puuid="unranked-player",
+            queue_id=420,
+        )
+
+        self.assertEqual(profile, saved_profile)
+        self.assertEqual(cache_hits, 0)
+        self.assertEqual(api_calls, 1)
+        client.get_league_entries_by_puuid.assert_called_once_with("unranked-player")
+        self.assertEqual(len(client.method_calls), 1)
+        cache.save_ranked_profile.assert_called_once()
 
 
 if __name__ == "__main__":

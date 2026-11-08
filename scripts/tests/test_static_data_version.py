@@ -38,6 +38,34 @@ class StaticDataVersionTests(unittest.TestCase):
         self.assertEqual(data.version, "99.1.1")
         fetch_version.assert_not_called()
 
+    def test_same_patch_reuses_saved_payload_without_download(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repository = StaticDataRepository(str(Path(temp_dir) / "cache.db"))
+            summoner = (
+                '{"data":{"Flash":{"key":"4","id":"SummonerFlash","name":"점멸"}}}'
+            )
+            with patch.object(repository, "_fetch_text", side_effect=[summoner, "[]"]):
+                repository.load(check_latest=True, latest_version="99.1.1")
+
+            with patch.object(
+                repository,
+                "_fetch_text",
+                side_effect=AssertionError("같은 패치는 다시 받으면 안 돼요."),
+            ) as fetch_text:
+                data = repository.load(check_latest=True, latest_version="99.1.1")
+
+        self.assertEqual(data.summoner_name(4), "점멸")
+        fetch_text.assert_not_called()
+
+    def test_manual_refresh_only_downloads_a_new_patch(self) -> None:
+        with (
+            patch.object(api_main, "_refresh_data_dragon_resources") as refresh,
+            patch.object(api_main, "_build_meta_options", return_value={}),
+        ):
+            api_main.refresh_meta()
+
+        refresh.assert_called_once_with(force_refresh=False, check_latest=True)
+
     def test_concurrent_startup_checks_share_one_resource_refresh(self) -> None:
         refresh_started = threading.Event()
         release_refresh = threading.Event()
