@@ -13,7 +13,6 @@ from src.api.main import (
     DEFAULT_MULTI_MATCHES_PER_PLAYER,
     DEFAULT_MULTI_SEARCH_DAYS,
     JobRecord,
-    STALE_COLLECTION_DAYS,
     _collection_plan,
     _days_since_collection,
     _latest_target_collection_at,
@@ -24,6 +23,10 @@ from src.multi_search_service import (
     MultiSearchRequest,
     MultiSearchTarget,
 )
+
+
+_NOW = 1_800_000_000
+_200_DAYS_AGO = _NOW - 200 * 86_400
 
 
 def _empty_identity_cache() -> Mock:
@@ -54,10 +57,14 @@ class PlayerMatchCollectionPlanTests(unittest.TestCase):
     def test_59_days_uses_automatic_calculation(self) -> None:
         self.assertEqual(_collection_plan(59), (59, 300, False))
 
-    def test_60_days_requires_90_day_confirmation(self) -> None:
+    def test_long_absence_confirms_and_covers_the_whole_gap(self) -> None:
         self.assertEqual(
             _collection_plan(60),
-            (STALE_COLLECTION_DAYS, AUTO_REFRESH_MAX_MATCHES_PER_PLAYER, True),
+            (60, AUTO_REFRESH_MAX_MATCHES_PER_PLAYER, True),
+        )
+        self.assertEqual(
+            _collection_plan(200),
+            (200, AUTO_REFRESH_MAX_MATCHES_PER_PLAYER, True),
         )
 
     def test_latest_collection_time_ignores_missing_values(self) -> None:
@@ -522,10 +529,11 @@ class PlayerMatchCollectionRequestTests(unittest.TestCase):
             origin="startup-auto",
         )
 
+    @patch.object(api_main.time, "time", return_value=_NOW)
     @patch.object(
         api_main,
         "_collection_targets",
-        return_value=[{"puuid": "player", "last_collected_at": 0}],
+        return_value=[{"puuid": "player", "last_collected_at": _200_DAYS_AGO}],
     )
     @patch.object(
         api_main,
@@ -536,6 +544,7 @@ class PlayerMatchCollectionRequestTests(unittest.TestCase):
         self,
         _config: object,
         _targets: object,
+        _time: object,
     ) -> None:
         with self.assertRaises(HTTPException) as context:
             api_main.create_player_match_collection_job(
@@ -545,14 +554,15 @@ class PlayerMatchCollectionRequestTests(unittest.TestCase):
         self.assertEqual(context.exception.status_code, 409)
         self.assertEqual(
             context.exception.detail,
-            "이번에 수집이 필요한 1명은 대상별 최근 최대 90일, "
+            "이번에 수집이 필요한 1명은 대상별 최근 최대 200일, "
             "최대 300판씩 수집할까요?",
         )
 
+    @patch.object(api_main.time, "time", return_value=_NOW)
     @patch.object(
         api_main,
         "_collection_targets",
-        return_value=[{"puuid": "player", "last_collected_at": 0}],
+        return_value=[{"puuid": "player", "last_collected_at": _200_DAYS_AGO}],
     )
     @patch.object(
         api_main,
@@ -564,11 +574,12 @@ class PlayerMatchCollectionRequestTests(unittest.TestCase):
         "_start_player_match_collection",
         return_value=SimpleNamespace(job_id="collection-job"),
     )
-    def test_confirmed_stale_collection_starts_90_day_job(
+    def test_confirmed_stale_collection_covers_the_whole_gap(
         self,
         start_collection: object,
         _config: object,
         _targets: object,
+        _time: object,
     ) -> None:
         result = api_main.create_player_match_collection_job(
             api_main.PlayerMatchCollectionBody(confirmed=True)
@@ -579,13 +590,13 @@ class PlayerMatchCollectionRequestTests(unittest.TestCase):
             targets=[
                 {
                     "puuid": "player",
-                    "last_collected_at": 0,
-                    "collection_days": 90,
+                    "last_collected_at": _200_DAYS_AGO,
+                    "collection_days": 200,
                     "collection_matches_per_player": 300,
                     "requires_confirmation": True,
                 }
             ],
-            days=90,
+            days=200,
             matches_per_player=300,
             origin="manual-auto",
         )

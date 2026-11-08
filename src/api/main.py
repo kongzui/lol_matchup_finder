@@ -316,7 +316,6 @@ AUTO_REFRESH_SKIP_DAYS = 1
 AUTO_REFRESH_MAX_DAYS = 60
 AUTO_REFRESH_MATCHES_PER_DAY = 15
 AUTO_REFRESH_MAX_MATCHES_PER_PLAYER = 300
-STALE_COLLECTION_DAYS = 90
 
 
 def _get_config() -> AppConfig:
@@ -731,15 +730,13 @@ def _days_since_collection(
 def _collection_plan(days_since_collection: int | None) -> tuple[int, int, bool]:
     if days_since_collection is None:
         return DEFAULT_MULTI_SEARCH_DAYS, DEFAULT_MULTI_MATCHES_PER_PLAYER, False
-    if days_since_collection >= AUTO_REFRESH_MAX_DAYS:
-        return STALE_COLLECTION_DAYS, AUTO_REFRESH_MAX_MATCHES_PER_PLAYER, True
 
     days = max(days_since_collection, 1)
     matches_per_player = min(
         days * AUTO_REFRESH_MATCHES_PER_DAY,
         AUTO_REFRESH_MAX_MATCHES_PER_PLAYER,
     )
-    return days, matches_per_player, False
+    return days, matches_per_player, days_since_collection >= AUTO_REFRESH_MAX_DAYS
 
 
 def _plan_collection_targets(
